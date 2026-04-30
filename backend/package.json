@@ -1,8 +1,8 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Physics QP analyser backend",
+  "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js"
@@ -10,12 +10,13 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
- "dependencies": {
-  "groq-sdk": "^0.9.0",
-  "cors": "^2.8.5",
-  "dotenv": "^16.4.5",
-  "express": "^4.19.2",
-  "multer": "^1.4.5-lts.1",
-  "pdfjs-dist": "^4.4.168"
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "groq-sdk": "^0.33.0",
+    "multer": "^2.1.1",
+    "pdfjs-dist": "^5.4.394"
+  }
 }
-}
+
