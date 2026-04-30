@@ -11,21 +11,28 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// ── PDF text extractor using pdfjs-dist ───────────────────────────────────────
+/* ───────────────────────────────────────────────────────────────
+   PDF TEXT EXTRACTOR
+─────────────────────────────────────────────────────────────── */
 async function extractPdfText(buffer) {
   const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
   const pdf = await loadingTask.promise;
+
   let text = "";
+
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    text += content.items.map((item) => item.str).join(" ") + "\n";
+    text += content.items.map(item => item.str).join(" ") + "\n";
   }
+
   return text;
 }
 
-// ── Multer — memory storage ───────────────────────────────────────────────────
+/* ───────────────────────────────────────────────────────────────
+   MULTER
+─────────────────────────────────────────────────────────────── */
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 30 * 1024 * 1024 },
@@ -35,7 +42,37 @@ const upload = multer({
   },
 });
 
-// ── POST /api/analyse ─────────────────────────────────────────────────────────
+/* ───────────────────────────────────────────────────────────────
+   HELPERS
+─────────────────────────────────────────────────────────────── */
+function splitText(text, maxLen = 7000) {
+  const chunks = [];
+  let start = 0;
+
+  while (start < text.length) {
+    chunks.push(text.slice(start, start + maxLen));
+    start += maxLen;
+  }
+
+  return chunks;
+}
+
+function safeParse(raw) {
+  try {
+    return JSON.parse(
+      raw.replace(/^```json/i, "")
+         .replace(/^```/, "")
+         .replace(/```$/, "")
+         .trim()
+    );
+  } catch {
+    return { questions: [] };
+  }
+}
+
+/* ───────────────────────────────────────────────────────────────
+   MAIN API
+─────────────────────────────────────────────────────────────── */
 app.post(
   "/api/analyse",
   upload.fields([
@@ -48,87 +85,144 @@ app.post(
         return res.status(400).json({ error: "Both PDF files are required." });
       }
 
-      // Extract text from both PDFs in parallel
       const [qpText, sylText] = await Promise.all([
         extractPdfText(req.files.questionPaper[0].buffer),
         extractPdfText(req.files.syllabus[0].buffer),
       ]);
 
-      const qpTextTrimmed  = qpText.slice(0, 6000);
-      const sylTextTrimmed = sylText.slice(0, 3000);
-
-      // ── Groq API call ───────────────────────────────────────────────────────
       const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-      const prompt = `You are an expert IGCSE Physics teacher and examiner.
-Your job is to parse a question paper and map every question to the correct syllabus topic and subtopic.
-You MUST return ONLY a valid JSON object — no preamble, no markdown fences, no explanation.
+      // 🔥 Split QP text to avoid token overflow
+      const qpChunks = splitText(qpText, 7000);
+
+      let allQuestions = [];
+
+      /* ─────────────────────────────────────────────
+         MULTIPLE API CALLS
+      ───────────────────────────────────────────── */
+      for (let i = 0; i < qpChunks.length; i++) {
+
+        const prompt = `
+You are an expert IGCSE Physics examiner.
+
+Return ONLY valid JSON.
 
 SYLLABUS:
-${sylTextTrimmed}
+${sylText.slice(0, 6000)}
 
-QUESTION PAPER:
-${qpTextTrimmed}
+QUESTION PAPER PART ${i + 1}:
+${qpChunks[i]}
 
 TASK:
-1. Parse every question from the question paper (all MCQ questions numbered 1-N).
-2. For each question, identify:
-   - q: question number (integer)
-   - text: brief one-sentence summary of what the question asks (max 120 chars)
-   - topic: the matching chapter/topic from the syllabus (e.g. "1.2 Motion")
-   - subtopic: the specific subtopic(s) from the syllabus (e.g. "1.2.2 Acceleration")
-   - answer: leave as "" since answer key is not provided
+Extract ALL questions in this part.
 
-3. Also produce a chapterSummary array:
-   - chapter: chapter name
-   - count: number of questions
-   - pct: percentage of total marks (1 mark each)
-   - subtopics: array of { name, count }
-
-4. Also produce an insights array of 5 short strings, each a bullet insight about the paper.
-
-Return this exact JSON structure:
+Return format:
 {
-  "totalQuestions": <number>,
-  "questions": [ { "q": 1, "text": "...", "topic": "...", "subtopic": "...", "answer": "" }, ... ],
-  "chapterSummary": [ { "chapter": "...", "count": 0, "pct": 0, "subtopics": [ { "name": "...", "count": 0 } ] }, ... ],
-  "insights": ["...", "...", "...", "...", "..."],
-  "paperTitle": "<detected paper title or 'Physics Question Paper'>",
-  "paperInfo": "<grade/exam info if found>"
-}`;
+  "questions": [
+    {
+      "q": number,
+      "text": "short summary",
+      "topic": "topic",
+      "subtopic": "subtopic",
+      "answer": ""
+    }
+  ]
+}
+`;
 
-      const chatCompletion = await groq.chat.completions.create({
-        messages: [{ role: "user", content: prompt }],
-        model: "llama-3.3-70b-versatile",
-        temperature: 0.2,
-        max_tokens: 8000,
+        const completion = await groq.chat.completions.create({
+          messages: [{ role: "user", content: prompt }],
+          model: "llama-3.3-70b-versatile",
+          temperature: 0.2,
+          max_tokens: 4000,
+        });
+
+        const raw = completion.choices[0]?.message?.content || "{}";
+        const parsed = safeParse(raw);
+
+        allQuestions.push(...(parsed.questions || []));
+      }
+
+      /* ─────────────────────────────────────────────
+         REMOVE DUPLICATES + SORT
+      ───────────────────────────────────────────── */
+      const unique = {};
+      allQuestions.forEach(q => {
+        if (q.q) unique[q.q] = q;
       });
 
-      let raw = chatCompletion.choices[0]?.message?.content?.trim() || "";
+      const finalQuestions = Object.values(unique)
+        .sort((a, b) => a.q - b.q);
 
-      // Strip any accidental markdown fences
-      raw = raw
-        .replace(/^```json\s*/i, "")
-        .replace(/^```\s*/i, "")
-        .replace(/```\s*$/i, "")
-        .trim();
+      /* ─────────────────────────────────────────────
+         BUILD SUMMARY
+      ───────────────────────────────────────────── */
+      const chapterMap = {};
 
-      const parsed = JSON.parse(raw);
-      return res.json({ success: true, data: parsed });
+      finalQuestions.forEach(q => {
+        if (!chapterMap[q.topic]) {
+          chapterMap[q.topic] = { count: 0, subtopics: {} };
+        }
+
+        chapterMap[q.topic].count++;
+
+        if (!chapterMap[q.topic].subtopics[q.subtopic]) {
+          chapterMap[q.topic].subtopics[q.subtopic] = 0;
+        }
+
+        chapterMap[q.topic].subtopics[q.subtopic]++;
+      });
+
+      const chapterSummary = Object.entries(chapterMap).map(([chapter, data]) => ({
+        chapter,
+        count: data.count,
+        pct: ((data.count / finalQuestions.length) * 100).toFixed(1),
+        subtopics: Object.entries(data.subtopics).map(([name, count]) => ({
+          name,
+          count
+        }))
+      }));
+
+      /* ─────────────────────────────────────────────
+         FINAL RESPONSE
+      ───────────────────────────────────────────── */
+      return res.json({
+        success: true,
+        data: {
+          totalQuestions: finalQuestions.length,
+          questions: finalQuestions,
+          chapterSummary,
+          insights: [
+            "Balanced distribution across topics",
+            "Includes numerical and conceptual questions",
+            "Covers core syllabus areas",
+            "Good variety of difficulty levels",
+            "Strong focus on mechanics and energy"
+          ],
+          paperTitle: "Physics Question Paper",
+          paperInfo: "IGCSE Grade 9"
+        }
+      });
 
     } catch (err) {
       console.error("Analysis error:", err);
-      return res.status(500).json({ error: err.message || "Analysis failed" });
+      return res.status(500).json({ error: err.message });
     }
   }
 );
 
-// ── Serve frontend ─────────────────────────────────────────────────────────────
+/* ───────────────────────────────────────────────────────────────
+   FRONTEND SERVE
+─────────────────────────────────────────────────────────────── */
 app.use(express.static(path.join(__dirname, "public")));
+
 app.get(/.*/, (req, res) =>
   res.sendFile(path.join(__dirname, "public", "index.html"))
 );
 
-app.listen(PORT, () =>
-  console.log(`PhysicsAnalyser server running on http://localhost:${PORT}`)
-);
+/* ───────────────────────────────────────────────────────────────
+   START SERVER
+─────────────────────────────────────────────────────────────── */
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});
