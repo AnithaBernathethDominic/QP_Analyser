@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PhysicsAnalyser — IGCSE Question Paper Mapper</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:       #0f1117;
+    --surface:  #181c27;
+    --card:     #1e2333;
+    --border:   #2a3050;
+    --accent:   #6c8bff;
+    --acc-soft: #3d4fa0;
+    --green:    #4ecb8d;
+    --amber:    #f5a623;
+    --red:      #e05c5c;
+    --text:     #e8ecf4;
+    --muted:    #7b84a0;
+  }
+  body { font-family: 'IBM Plex Mono', monospace; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* ── header ── */
+  .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 32px; display: flex; align-items: center; gap: 14px; position: sticky; top: 0; z-index: 100; }
+  .logo-icon { width: 38px; height: 38px; border-radius: 10px; background: var(--accent); display: grid; place-items: center; font-size: 20px; flex-shrink: 0; }
+  .logo-title { font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 800; letter-spacing: -0.5px; }
+  .logo-sub { font-size: 10px; color: var(--muted); margin-top: 1px; }
+  .header-actions { margin-left: auto; display: flex; gap: 10px; }
+
+  /* ── layout ── */
+  .main { max-width: 1140px; margin: 0 auto; padding: 36px 24px; }
+
+  /* ── buttons ── */
+  .btn { font-family: 'IBM Plex Mono', monospace; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; border: none; padding: 10px 22px; transition: all 0.18s; }
+  .btn-accent { background: var(--accent); color: #fff; }
+  .btn-accent:hover { background: #7d9aff; }
+  .btn-accent:disabled { opacity: 0.38; cursor: not-allowed; }
+  .btn-ghost { background: none; color: var(--muted); border: 1px solid var(--border); }
+  .btn-ghost:hover { color: var(--text); border-color: var(--muted); }
+  .btn-green { background: var(--green); color: #0f1117; }
+  .btn-green:hover { background: #5fdda0; }
+
+  /* ── upload screen ── */
+  .upload-hero { text-align: center; margin-bottom: 44px; }
+  .upload-hero h1 { font-family: 'Syne', sans-serif; font-size: 38px; font-weight: 800; letter-spacing: -1px; }
+  .upload-hero p { color: var(--muted); font-size: 14px; margin-top: 10px; max-width: 520px; margin-left: auto; margin-right: auto; line-height: 1.6; }
+  .upload-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; max-width: 680px; margin: 0 auto 36px; }
+  .dropzone { background: var(--card); border: 2px dashed var(--border); border-radius: 14px; padding: 36px 24px; text-align: center; cursor: pointer; transition: all 0.2s; }
+  .dropzone:hover, .dropzone.drag { border-color: var(--accent); background: rgba(108,139,255,0.07); }
+  .dropzone.filled { border-color: var(--green); border-style: solid; }
+  .dropzone .dz-icon { font-size: 40px; margin-bottom: 12px; }
+  .dropzone .dz-label { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+  .dropzone .dz-hint { color: var(--muted); font-size: 11px; }
+  .dropzone .dz-filename { color: var(--green); font-size: 12px; margin-top: 6px; word-break: break-all; }
+  .dropzone .dz-cta { color: var(--accent); font-size: 12px; margin-top: 8px; }
+  .upload-center { text-align: center; }
+
+  /* ── progress screen ── */
+  .progress-wrap { text-align: center; padding-top: 80px; }
+  .progress-bar-track { background: var(--border); border-radius: 99px; height: 10px; overflow: hidden; max-width: 440px; margin: 0 auto; }
+  .progress-bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--green)); border-radius: 99px; transition: width 0.3s ease; }
+  .progress-steps { margin-top: 32px; display: flex; flex-direction: column; gap: 10px; align-items: center; }
+  .step-row { font-size: 12px; transition: color 0.4s; }
+  .step-done { color: var(--green); }
+  .step-pending { color: var(--muted); }
+
+  /* ── summary cards ── */
+  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 30px; }
+  .summary-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; }
+  .summary-card .sc-icon { font-size: 22px; }
+  .summary-card .sc-val { font-family: 'Syne', sans-serif; font-size: 32px; font-weight: 800; margin-top: 6px; }
+  .summary-card .sc-lbl { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+  /* ── tabs ── */
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 26px; }
+  .tab { background: none; border: none; color: var(--muted); border-bottom: 2px solid transparent; padding: 10px 18px; font-size: 13px; cursor: pointer; font-family: inherit; margin-bottom: -1px; transition: color 0.2s; }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ── table ── */
+  .tbl-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead tr { background: var(--card); }
+  th { padding: 12px 14px; text-align: left; color: var(--muted); font-weight: 500; border-bottom: 1px solid var(--border); font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap; }
+  tbody tr:nth-child(even) { background: var(--surface); }
+  tbody tr:nth-child(odd) { background: var(--card); }
+  td { padding: 11px 14px; border-bottom: 1px solid var(--border); line-height: 1.5; }
+  td:last-child, th:last-child { text-align: center; }
+  .tag { display: inline-block; border-radius: 6px; padding: 3px 9px; font-size: 11px; font-weight: 600; }
+  .tag-ans { background: rgba(78,203,141,0.15); color: var(--green); border: 1px solid rgba(78,203,141,0.3); }
+
+  /* ── chart bars ── */
+  .chart-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 24px 28px; margin-bottom: 28px; }
+  .bar-row { margin-bottom: 14px; }
+  .bar-label-row { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 13px; }
+  .bar-track { background: var(--border); border-radius: 99px; height: 10px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 99px; transition: width 1.2s cubic-bezier(0.22,1,0.36,1); }
+
+  /* ── chapter cards ── */
+  .chapter-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 18px; }
+  .chapter-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; border-left: 4px solid; }
+  .cc-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
+  .cc-title { font-weight: 600; font-size: 14px; line-height: 1.4; }
+  .cc-badge { border-radius: 8px; padding: 4px 10px; font-size: 13px; font-weight: 700; white-space: nowrap; margin-left: 10px; }
+  .cc-divider { height: 1px; background: var(--border); margin-bottom: 12px; }
+  .cc-sub-lbl { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+  .cc-sub-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px; }
+  .cc-sub-name { color: var(--muted); font-size: 12px; line-height: 1.4; padding-right: 12px; }
+  .cc-sub-cnt { font-size: 12px; font-weight: 700; border-radius: 5px; padding: 2px 7px; white-space: nowrap; }
+  .cc-footer { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .cc-footer-row { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 6px; }
+  .cc-footer-bar { background: var(--border); border-radius: 99px; height: 5px; overflow: hidden; }
+  .cc-footer-fill { height: 100%; border-radius: 99px; }
+
+  /* ── insights ── */
+  .insights { background: rgba(61,79,160,0.2); border: 1px solid var(--acc-soft); border-radius: 12px; padding: 20px 24px; margin-top: 24px; }
+  .insights h3 { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 15px; color: var(--accent); margin-bottom: 12px; }
+  .insight-row { display: flex; gap: 10px; font-size: 13px; margin-bottom: 8px; line-height: 1.5; }
+  .insight-bullet { color: var(--accent); flex-shrink: 0; }
+
+  /* ── error ── */
+  .error-box { background: rgba(224,92,92,0.1); border: 1px solid rgba(224,92,92,0.4); border-radius: 10px; padding: 16px 20px; color: var(--red); font-size: 13px; margin-top: 16px; text-align: center; }
+
+  /* ── responsive ── */
+  @media (max-width: 700px) {
+    .upload-grid { grid-template-columns: 1fr; }
+    .summary-grid { grid-template-columns: repeat(2, 1fr); }
+    .header { padding: 14px 16px; }
+    .main { padding: 24px 14px; }
+    .upload-hero h1 { font-size: 26px; }
+  }
+
+  /* ── hide utility ── */
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- ── Header ────────────────────────────────────────────────────────────── -->
+<header class="header">
+  <div class="logo-icon">⚛</div>
+  <div>
+    <div class="logo-title">PhysicsAnalyser</div>
+    <div class="logo-sub">IGCSE Question Paper × Syllabus Mapping Engine</div>
+  </div>
+  <div class="header-actions" id="headerActions" style="display:none">
+    <button class="btn btn-ghost" onclick="resetApp()">↩ New Analysis</button>
+    <button class="btn btn-green" onclick="exportCSV()">⬇ Export CSV</button>
+  </div>
+</header>
+
+<!-- ── Main ──────────────────────────────────────────────────────────────── -->
+<main class="main">
+
+  <!-- UPLOAD -->
+  <div id="uploadScreen">
+    <div class="upload-hero">
+      <h1>Analyse Your Question Paper</h1>
+      <p>Upload the IGCSE Physics question paper and syllabus PDF. The AI will parse every question, map it to the correct syllabus topic, and generate a chapter-wise weightage report.</p>
+    </div>
+
+    <div class="upload-grid">
+      <!-- QP drop zone -->
+      <div class="dropzone" id="dzQP" onclick="document.getElementById('fileQP').click()" ondrop="handleDrop(event,'qp')" ondragover="handleDragOver(event,'dzQP')" ondragleave="handleDragLeave('dzQP')">
+        <input type="file" id="fileQP" accept=".pdf" style="display:none" onchange="handleFile(this,'qp')" />
+        <div class="dz-icon" id="iconQP">📄</div>
+        <div class="dz-label">Question Paper</div>
+        <div class="dz-hint">PDF · Max 20 MB</div>
+        <div class="dz-filename hidden" id="nameQP"></div>
+        <div class="dz-cta" id="ctaQP">Click or drag to upload</div>
+      </div>
+
+      <!-- Syllabus drop zone -->
+      <div class="dropzone" id="dzSYL" onclick="document.getElementById('fileSYL').click()" ondrop="handleDrop(event,'syl')" ondragover="handleDragOver(event,'dzSYL')" ondragleave="handleDragLeave('dzSYL')">
+        <input type="file" id="fileSYL" accept=".pdf" style="display:none" onchange="handleFile(this,'syl')" />
+        <div class="dz-icon" id="iconSYL">📋</div>
+        <div class="dz-label">Syllabus Document</div>
+        <div class="dz-hint">PDF · Max 10 MB</div>
+        <div class="dz-filename hidden" id="nameSYL"></div>
+        <div class="dz-cta" id="ctaSYL">Click or drag to upload</div>
+      </div>
+    </div>
+
+    <div class="upload-center">
+      <button class="btn btn-accent" id="analyseBtn" onclick="startAnalysis()" disabled style="padding:14px 52px;font-size:15px;">
+        ▶ Analyse Paper
+      </button>
+      <div style="color:var(--muted);font-size:12px;margin-top:10px" id="uploadHint">Upload both files to continue</div>
+      <div class="error-box hidden" id="errorBox"></div>
+    </div>
+  </div>
+
+  <!-- PROGRESS -->
+  <div id="progressScreen" class="hidden">
+    <div class="progress-wrap">
+      <div style="font-size:48px;margin-bottom:20px">🔬</div>
+      <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:800;margin-bottom:8px">Analysing Paper…</div>
+      <div style="color:var(--muted);font-size:13px;margin-bottom:40px">Parsing questions · Mapping syllabus topics · Computing weightage</div>
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill" id="progressFill" style="width:0%"></div>
+      </div>
+      <div style="color:var(--muted);font-size:12px;margin-top:10px" id="progressPct">0% complete</div>
+      <div class="progress-steps" id="progressSteps">
+        <div class="step-row step-pending" id="step0">○ Extracting text from PDFs…</div>
+        <div class="step-row step-pending" id="step1">○ Loading syllabus structure…</div>
+        <div class="step-row step-pending" id="step2">○ Mapping questions to topics…</div>
+        <div class="step-row step-pending" id="step3">○ Calculating chapter weightage…</div>
+        <div class="step-row step-pending" id="step4">○ Generating insights…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RESULT -->
+  <div id="resultScreen" class="hidden">
+    <!-- Summary cards -->
+    <div class="summary-grid" id="summaryCards"></div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab active" id="tabQuestions" onclick="switchTab('questions')">📋 Question Mapping</button>
+      <button class="tab" id="tabReport" onclick="switchTab('report')">📊 Weightage Report</button>
+    </div>
+
+    <!-- Questions tab -->
+    <div id="panelQuestions">
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Q#</th>
+              <th>Question Summary</th>
+              <th>Topic</th>
+              <th>Subtopic</th>
+              <th>Ans</th>
+            </tr>
+          </thead>
+          <tbody id="questionsTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Report tab -->
+    <div id="panelReport" class="hidden">
+      <div style="margin-bottom:24px">
+        <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;margin-bottom:4px">Chapter-wise Weightage</div>
+        <div style="color:var(--muted);font-size:12px">Questions and marks percentage per IGCSE topic chapter</div>
+      </div>
+      <div class="chart-wrap" id="chartWrap"></div>
+      <div class="chapter-grid" id="chapterGrid"></div>
+      <div class="insights" id="insightsBox"></div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let fileQP = null, fileSYL = null, analysisData = null;
+
+const TOPIC_COLORS = [
+  "#6c8bff","#4ecb8d","#f5a623","#e05c5c","#a78bfa",
+  "#38bdf8","#fb923c","#34d399","#f472b6","#facc15"
+];
+
+// Detect API base — same origin in prod, localhost:3001 in dev
+const API_BASE = window.location.hostname === "localhost" && window.location.port !== "3001"
+  ? "http://localhost:3001"
+  : "";
+
+// ── File handling ─────────────────────────────────────────────────────────────
+function handleFile(input, which) {
+  const file = input.files[0];
+  if (!file) return;
+  setFile(which, file);
+}
+function handleDrop(e, which) {
+  e.preventDefault();
+  handleDragLeave(which === "qp" ? "dzQP" : "dzSYL");
+  const file = e.dataTransfer.files[0];
+  if (file && file.type === "application/pdf") setFile(which, file);
+}
+function handleDragOver(e, id) { e.preventDefault(); document.getElementById(id).classList.add("drag"); }
+function handleDragLeave(id) { document.getElementById(id).classList.remove("drag"); }
+
+function setFile(which, file) {
+  const isQP = which === "qp";
+  if (isQP) fileQP = file; else fileSYL = file;
+  const dz = document.getElementById(isQP ? "dzQP" : "dzSYL");
+  const icon = document.getElementById(isQP ? "iconQP" : "iconSYL");
+  const name = document.getElementById(isQP ? "nameQP" : "nameSYL");
+  const cta  = document.getElementById(isQP ? "ctaQP"  : "ctaSYL");
+  dz.classList.add("filled");
+  icon.textContent = "✅";
+  name.textContent = file.name;
+  name.classList.remove("hidden");
+  cta.classList.add("hidden");
+  updateAnalyseBtn();
+}
+
+function updateAnalyseBtn() {
+  const btn = document.getElementById("analyseBtn");
+  const hint = document.getElementById("uploadHint");
+  btn.disabled = !(fileQP && fileSYL);
+  hint.style.display = (fileQP && fileSYL) ? "none" : "";
+}
+
+// ── Analysis ──────────────────────────────────────────────────────────────────
+async function startAnalysis() {
+  document.getElementById("errorBox").classList.add("hidden");
+  show("progressScreen"); hide("uploadScreen");
+
+  // Animate progress independently while waiting for API
+  let prog = 0;
+  const steps = [0,1,2,3,4];
+  const stepThresholds = [10,25,50,75,90];
+  const iv = setInterval(() => {
+    prog = Math.min(prog + (Math.random() * 8 + 2), 92);
+    document.getElementById("progressFill").style.width = prog + "%";
+    document.getElementById("progressPct").textContent = Math.round(prog) + "% complete";
+    steps.forEach((s, i) => {
+      const el = document.getElementById("step" + s);
+      if (prog >= stepThresholds[i]) {
+        el.classList.remove("step-pending"); el.classList.add("step-done");
+        el.textContent = "✓ " + el.textContent.replace(/^[○✓] /, "");
+      }
+    });
+  }, 300);
+
+  try {
+    const form = new FormData();
+    form.append("questionPaper", fileQP);
+    form.append("syllabus", fileSYL);
+
+    const res = await fetch(`${API_BASE}/api/analyse`, { method: "POST", body: form });
+    const json = await res.json();
+
+    clearInterval(iv);
+
+    if (!res.ok || !json.success) throw new Error(json.error || "Analysis failed");
+
+    // Finish progress bar
+    document.getElementById("progressFill").style.width = "100%";
+    document.getElementById("progressPct").textContent = "100% complete";
+    steps.forEach(s => {
+      const el = document.getElementById("step" + s);
+      el.classList.remove("step-pending"); el.classList.add("step-done");
+      el.textContent = "✓ " + el.textContent.replace(/^[○✓] /, "");
+    });
+
+    analysisData = json.data;
+    setTimeout(() => { hide("progressScreen"); renderResults(); }, 500);
+
+  } catch (err) {
+    clearInterval(iv);
+    hide("progressScreen"); show("uploadScreen");
+    const eb = document.getElementById("errorBox");
+    eb.textContent = "❌ " + (err.message || "Something went wrong. Please try again.");
+    eb.classList.remove("hidden");
+  }
+}
+
+// ── Render Results ────────────────────────────────────────────────────────────
+function renderResults() {
+  const d = analysisData;
+  show("resultScreen");
+  document.getElementById("headerActions").style.display = "flex";
+
+  // Summary cards
+  const uniqueSubtopics = new Set();
+  d.questions.forEach(q => q.subtopic.split("/").forEach(s => uniqueSubtopics.add(s.trim())));
+
+  document.getElementById("summaryCards").innerHTML = [
+    { label: "Total Questions", value: d.totalQuestions, icon: "❓", color: "var(--accent)" },
+    { label: "Total Marks",     value: d.totalQuestions, icon: "🏆", color: "var(--green)" },
+    { label: "Topics Covered",  value: d.chapterSummary.length, icon: "📚", color: "var(--amber)" },
+    { label: "Subtopics Mapped",value: uniqueSubtopics.size, icon: "🔗", color: "#a78bfa" },
+  ].map(c => `
+    <div class="summary-card">
+      <div class="sc-icon">${c.icon}</div>
+      <div class="sc-val" style="color:${c.color}">${c.value}</div>
+      <div class="sc-lbl">${c.label}</div>
+    </div>`).join("");
+
+  // Questions table
+  document.getElementById("questionsTbody").innerHTML = d.questions.map((q, i) => {
+    const ci = d.chapterSummary.findIndex(c => c.chapter === q.topic);
+    const color = TOPIC_COLORS[(ci < 0 ? i : ci) % TOPIC_COLORS.length];
+    return `<tr>
+      <td style="color:var(--accent);font-weight:700;white-space:nowrap">${q.q}</td>
+      <td style="max-width:340px">${escHtml(q.text)}</td>
+      <td><span class="tag" style="background:${color}22;color:${color};border:1px solid ${color}44">${escHtml(q.topic)}</span></td>
+      <td style="color:var(--muted);font-size:12px;max-width:260px">${escHtml(q.subtopic)}</td>
+      <td><span class="tag tag-ans">${q.answer || "—"}</span></td>
+    </tr>`;
+  }).join("");
+
+  // Chart bars
+  const sorted = [...d.chapterSummary].sort((a,b) => b.count - a.count);
+  document.getElementById("chartWrap").innerHTML = `
+    <div style="font-family:'Syne',sans-serif;font-size:15px;font-weight:700;margin-bottom:20px">Questions per Chapter</div>
+    ${sorted.map((ch, i) => {
+      const color = TOPIC_COLORS[i % TOPIC_COLORS.length];
+      return `<div class="bar-row">
+        <div class="bar-label-row">
+          <span>${escHtml(ch.chapter)}</span>
+          <span style="color:${color};font-weight:700">${ch.count}Q &nbsp;·&nbsp; ${ch.pct.toFixed(1)}%</span>
+        </div>
+        <div class="bar-track"><div class="bar-fill" style="width:${ch.pct}%;background:${color}"></div></div>
+      </div>`;
+    }).join("")}`;
+
+  // Chapter cards
+  document.getElementById("chapterGrid").innerHTML = sorted.map((ch, i) => {
+    const color = TOPIC_COLORS[i % TOPIC_COLORS.length];
+    return `<div class="chapter-card" style="border-left-color:${color}">
+      <div class="cc-header">
+        <div class="cc-title">${escHtml(ch.chapter)}</div>
+        <div class="cc-badge" style="background:${color}22;color:${color};border:1px solid ${color}44">${ch.count} / ${d.totalQuestions}</div>
+      </div>
+      <div class="cc-divider"></div>
+      <div class="cc-sub-lbl">Subtopics</div>
+      ${(ch.subtopics || []).map(s => `
+        <div class="cc-sub-row">
+          <span class="cc-sub-name">${escHtml(s.name)}</span>
+          <span class="cc-sub-cnt" style="color:${color};background:${color}18">${s.count}Q</span>
+        </div>`).join("")}
+      <div class="cc-footer">
+        <div class="cc-footer-row">
+          <span style="color:var(--muted)">Marks contribution</span>
+          <span style="color:${color};font-weight:700">${ch.pct.toFixed(1)}%</span>
+        </div>
+        <div class="cc-footer-bar"><div class="cc-footer-fill" style="width:${ch.pct}%;background:${color}"></div></div>
+      </div>
+    </div>`;
+  }).join("");
+
+  // Insights
+  document.getElementById("insightsBox").innerHTML = `
+    <h3>🔍 Key Insights</h3>
+    ${(d.insights || []).map(ins => `
+      <div class="insight-row">
+        <span class="insight-bullet">›</span>
+        <span>${escHtml(ins)}</span>
+      </div>`).join("")}`;
+}
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  ["questions","report"].forEach(t => {
+    document.getElementById("tab" + cap(t)).classList.toggle("active", t === tab);
+    document.getElementById("panel" + cap(t)).classList.toggle("hidden", t !== tab);
+  });
+}
+function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+// ── Export CSV ────────────────────────────────────────────────────────────────
+function exportCSV() {
+  if (!analysisData) return;
+  const rows = ["Q No,Question,Topic,Subtopic,Answer",
+    ...analysisData.questions.map(r =>
+      `${r.q},"${(r.text||"").replace(/"/g,'""')}","${r.topic}","${r.subtopic}","${r.answer}"`)
+  ];
+  const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = "physics_paper_analysis.csv"; a.click();
+}
+
+// ── Reset ─────────────────────────────────────────────────────────────────────
+function resetApp() {
+  fileQP = null; fileSYL = null; analysisData = null;
+  ["dzQP","dzSYL"].forEach(id => document.getElementById(id).classList.remove("filled","drag"));
+  ["iconQP","iconSYL"].forEach((id,i) => document.getElementById(id).textContent = i===0?"📄":"📋");
+  ["nameQP","nameSYL"].forEach(id => { const el=document.getElementById(id); el.classList.add("hidden"); el.textContent=""; });
+  ["ctaQP","ctaSYL"].forEach(id => document.getElementById(id).classList.remove("hidden"));
+  ["fileQP","fileSYL"].forEach(id => document.getElementById(id).value="");
+  document.getElementById("progressFill").style.width = "0%";
+  [0,1,2,3,4].forEach(i => {
+    const el = document.getElementById("step"+i);
+    el.classList.remove("step-done"); el.classList.add("step-pending");
+    el.textContent = "○ " + el.textContent.replace(/^[✓○] /, "");
+  });
+  document.getElementById("headerActions").style.display = "none";
+  document.getElementById("errorBox").classList.add("hidden");
+  updateAnalyseBtn();
+  hide("resultScreen"); hide("progressScreen"); show("uploadScreen");
+  switchTab("questions");
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function show(id) { document.getElementById(id).classList.remove("hidden"); }
+function hide(id) { document.getElementById(id).classList.add("hidden"); }
+function escHtml(s) {
+  if (!s) return "";
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+</script>
+</body>
+</html>
