@@ -59,7 +59,7 @@ app.post(
 
       // ── Gemini API call ─────────────────────────────────────────────────────
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
 
       const prompt = `You are an expert IGCSE Physics teacher and examiner.
 Your job is to parse a question paper and map every question to the correct syllabus topic and subtopic.
