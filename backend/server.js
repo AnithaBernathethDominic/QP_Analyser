@@ -154,55 +154,94 @@ Return format:
       const finalQuestions = Object.values(unique)
         .sort((a, b) => a.q - b.q);
 
-      /* ─────────────────────────────────────────────
-         BUILD SUMMARY
-      ───────────────────────────────────────────── */
-      const chapterMap = {};
+ 
+    /* ─────────────────────────────────────────────
+   BUILD CHAPTER-WISE WEIGHTAGE SUMMARY
+───────────────────────────────────────────── */
+const chapterMap = {};
 
-      finalQuestions.forEach(q => {
-        if (!chapterMap[q.topic]) {
-          chapterMap[q.topic] = { count: 0, subtopics: {} };
-        }
+finalQuestions.forEach(q => {
+  const topic = q.topic || "Unmapped Topic";
+  const subtopic = q.subtopic || "Unmapped Subtopic";
 
-        chapterMap[q.topic].count++;
+  if (!chapterMap[topic]) {
+    chapterMap[topic] = {
+      chapter: topic,
+      topic: topic,
+      count: 0,
+      questions: 0,
+      marks: 0,
+      subtopics: {}
+    };
+  }
 
-        if (!chapterMap[q.topic].subtopics[q.subtopic]) {
-          chapterMap[q.topic].subtopics[q.subtopic] = 0;
-        }
+  chapterMap[topic].count += 1;
+  chapterMap[topic].questions += 1;
+  chapterMap[topic].marks += 1;
 
-        chapterMap[q.topic].subtopics[q.subtopic]++;
-      });
+  if (!chapterMap[topic].subtopics[subtopic]) {
+    chapterMap[topic].subtopics[subtopic] = {
+      name: subtopic,
+      count: 0,
+      questions: 0,
+      marks: 0
+    };
+  }
 
-      const chapterSummary = Object.entries(chapterMap).map(([chapter, data]) => ({
-        chapter,
-        count: data.count,
-        pct: ((data.count / finalQuestions.length) * 100).toFixed(1),
-        subtopics: Object.entries(data.subtopics).map(([name, count]) => ({
-          name,
-          count
-        }))
-      }));
+  chapterMap[topic].subtopics[subtopic].count += 1;
+  chapterMap[topic].subtopics[subtopic].questions += 1;
+  chapterMap[topic].subtopics[subtopic].marks += 1;
+});
 
+const totalMarks = finalQuestions.length;
+
+const chapterSummary = Object.values(chapterMap).map(ch => {
+  const percentage = totalMarks > 0
+    ? Number(((ch.marks / totalMarks) * 100).toFixed(1))
+    : 0;
+
+  return {
+    chapter: ch.chapter,
+    topic: ch.topic,
+
+    // frontend-safe fields
+    count: ch.count,
+    questions: ch.questions,
+    marks: ch.marks,
+    pct: percentage,
+    percentage: percentage,
+
+    subtopics: Object.values(ch.subtopics).map(st => ({
+      name: st.name,
+      count: st.count,
+      questions: st.questions,
+      marks: st.marks,
+      pct: Number(((st.marks / totalMarks) * 100).toFixed(1)),
+      percentage: Number(((st.marks / totalMarks) * 100).toFixed(1))
+    }))
+  };
+});
       /* ─────────────────────────────────────────────
          FINAL RESPONSE
       ───────────────────────────────────────────── */
       return res.json({
-        success: true,
-        data: {
-          totalQuestions: finalQuestions.length,
-          questions: finalQuestions,
-          chapterSummary,
-          insights: [
-            "Balanced distribution across topics",
-            "Includes numerical and conceptual questions",
-            "Covers core syllabus areas",
-            "Good variety of difficulty levels",
-            "Strong focus on mechanics and energy"
-          ],
-          paperTitle: "Physics Question Paper",
-          paperInfo: "IGCSE Grade 9"
-        }
-      });
+  success: true,
+  data: {
+    totalQuestions: finalQuestions.length,
+    totalMarks: finalQuestions.length,
+    questions: finalQuestions,
+    chapterSummary,
+    insights: [
+      "Balanced distribution across topics",
+      "Includes numerical and conceptual questions",
+      "Covers core syllabus areas",
+      "Good variety of difficulty levels",
+      "Strong focus on mechanics and energy"
+    ],
+    paperTitle: "Physics Question Paper",
+    paperInfo: "IGCSE Grade 9"
+  }
+});
 
     } catch (err) {
       console.error("Analysis error:", err);
