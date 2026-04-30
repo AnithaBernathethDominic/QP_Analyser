@@ -3,7 +3,7 @@ const express = require("express");
 const multer = require("multer");
 const cors = require("cors");
 const path = require("path");
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const Groq = require("groq-sdk");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -57,9 +57,8 @@ app.post(
       const qpTextTrimmed  = qpText.slice(0, 12000);
       const sylTextTrimmed = sylText.slice(0, 6000);
 
-      // ── Gemini API call ─────────────────────────────────────────────────────
-      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+      // ── Groq API call ───────────────────────────────────────────────────────
+      const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
       const prompt = `You are an expert IGCSE Physics teacher and examiner.
 Your job is to parse a question paper and map every question to the correct syllabus topic and subtopic.
@@ -98,9 +97,14 @@ Return this exact JSON structure:
   "paperInfo": "<grade/exam info if found>"
 }`;
 
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      let raw = response.text().trim();
+      const chatCompletion = await groq.chat.completions.create({
+        messages: [{ role: "user", content: prompt }],
+        model: "llama-3.3-70b-versatile",
+        temperature: 0.2,
+        max_tokens: 8000,
+      });
+
+      let raw = chatCompletion.choices[0]?.message?.content?.trim() || "";
 
       // Strip any accidental markdown fences
       raw = raw
