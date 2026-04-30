@@ -11,11 +11,11 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.91.1",
-    "cors": "^2.8.6",
-    "dotenv": "^17.4.2",
-    "express": "^5.2.1",
-    "multer": "^2.1.1",
-    "pdfjs-dist": "^4.4.168"
-  }
+  "@google/generative-ai": "^0.21.0",
+  "cors": "^2.8.5",
+  "dotenv": "^16.4.5",
+  "express": "^4.19.2",
+  "multer": "^1.4.5-lts.1",
+  "pdfjs-dist": "^4.4.168"
+}
 }
