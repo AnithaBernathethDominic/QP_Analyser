@@ -3,8 +3,6 @@ const express = require("express");
 const multer = require("multer");
 const cors = require("cors");
 const path = require("path");
-const fs = require("fs");
-const pdfParse = require("pdf-parse/lib/pdf-parse.js");
 const Anthropic = require("@anthropic-ai/sdk");
 
 const app = express();
@@ -13,7 +11,21 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// Multer — memory storage (no disk writes needed)
+// ── PDF text extractor using pdfjs-dist ───────────────────────────────────────
+async function extractPdfText(buffer) {
+  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+  const pdf = await loadingTask.promise;
+  let text = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map((item) => item.str).join(" ") + "\n";
+  }
+  return text;
+}
+
+// ── Multer — memory storage (no disk writes needed) ───────────────────────────
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 30 * 1024 * 1024 },
@@ -23,7 +35,7 @@ const upload = multer({
   },
 });
 
-// ── /api/analyse  POST ─────────────────────────────────────────────────────────
+// ── POST /api/analyse ─────────────────────────────────────────────────────────
 app.post(
   "/api/analyse",
   upload.fields([
@@ -36,14 +48,14 @@ app.post(
         return res.status(400).json({ error: "Both PDF files are required." });
       }
 
-      // Extract text from PDFs
-      const [qpData, sylData] = await Promise.all([
-        pdfParse(req.files.questionPaper[0].buffer),
-        pdfParse(req.files.syllabus[0].buffer),
+      // Extract text from both PDFs in parallel
+      const [qpText, sylText] = await Promise.all([
+        extractPdfText(req.files.questionPaper[0].buffer),
+        extractPdfText(req.files.syllabus[0].buffer),
       ]);
 
-      const qpText = qpData.text.slice(0, 12000);   // trim for token budget
-      const sylText = sylData.text.slice(0, 6000);
+      const qpTextTrimmed  = qpText.slice(0, 12000);  // trim for token budget
+      const sylTextTrimmed = sylText.slice(0, 6000);
 
       const client = new Anthropic();
 
@@ -53,10 +65,10 @@ You MUST return ONLY a valid JSON object — no preamble, no markdown fences, no
 
       const userPrompt = `
 SYLLABUS:
-${sylText}
+${sylTextTrimmed}
 
 QUESTION PAPER:
-${qpText}
+${qpTextTrimmed}
 
 TASK:
 1. Parse every question from the question paper (all MCQ questions numbered 1-N).
@@ -65,7 +77,7 @@ TASK:
    - text: brief one-sentence summary of what the question asks (max 120 chars)
    - topic: the matching chapter/topic from the syllabus (e.g. "1.2 Motion")
    - subtopic: the specific subtopic(s) from the syllabus (e.g. "1.2.2 Acceleration")
-   - answer: if discernible from context leave blank "", otherwise ""
+   - answer: leave as "" since answer key is not provided
 
 3. Also produce a chapterSummary array:
    - chapter: chapter name
@@ -94,10 +106,15 @@ Return this exact JSON structure:
 
       let raw = message.content[0].text.trim();
       // Strip any accidental markdown fences
-      raw = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
+      raw = raw
+        .replace(/^```json\s*/i, "")
+        .replace(/^```\s*/i, "")
+        .replace(/```\s*$/i, "")
+        .trim();
 
       const result = JSON.parse(raw);
       return res.json({ success: true, data: result });
+
     } catch (err) {
       console.error("Analysis error:", err);
       return res.status(500).json({ error: err.message || "Analysis failed" });
@@ -107,6 +124,10 @@ Return this exact JSON structure:
 
 // ── Serve frontend ─────────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, "public")));
-app.get(/.*/, (req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
+app.get(/.*/, (req, res) =>
+  res.sendFile(path.join(__dirname, "public", "index.html"))
+);
 
-app.listen(PORT, () => console.log(`PhysicsAnalyser server running on http://localhost:${PORT}`));
+app.listen(PORT, () =>
+  console.log(`PhysicsAnalyser server running on http://localhost:${PORT}`)
+);
