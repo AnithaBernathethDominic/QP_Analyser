@@ -54,8 +54,8 @@ app.post(
         extractPdfText(req.files.syllabus[0].buffer),
       ]);
 
-      const qpTextTrimmed  = qpText.slice(0, 12000);
-      const sylTextTrimmed = sylText.slice(0, 6000);
+      const qpTextTrimmed  = qpText.slice(0, 6000);
+      const sylTextTrimmed = sylText.slice(0, 3000);
 
       // ── Groq API call ───────────────────────────────────────────────────────
       const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
