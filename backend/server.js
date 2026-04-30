@@ -4,7 +4,7 @@ const multer = require("multer");
 const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
-const pdfParse = require("pdf-parse");
+const pdfParse = require("pdf-parse/lib/pdf-parse.js");
 const Anthropic = require("@anthropic-ai/sdk");
 
 const app = express();
