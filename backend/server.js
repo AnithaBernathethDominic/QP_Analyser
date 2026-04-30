@@ -3,7 +3,7 @@ const express = require("express");
 const multer = require("multer");
 const cors = require("cors");
 const path = require("path");
-const Anthropic = require("@anthropic-ai/sdk");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -25,7 +25,7 @@ async function extractPdfText(buffer) {
   return text;
 }
 
-// ── Multer — memory storage (no disk writes needed) ───────────────────────────
+// ── Multer — memory storage ───────────────────────────────────────────────────
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 30 * 1024 * 1024 },
@@ -54,16 +54,17 @@ app.post(
         extractPdfText(req.files.syllabus[0].buffer),
       ]);
 
-      const qpTextTrimmed  = qpText.slice(0, 12000);  // trim for token budget
+      const qpTextTrimmed  = qpText.slice(0, 12000);
       const sylTextTrimmed = sylText.slice(0, 6000);
 
-      const client = new Anthropic();
+      // ── Gemini API call ─────────────────────────────────────────────────────
+      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-      const systemPrompt = `You are an expert IGCSE Physics teacher and examiner. 
+      const prompt = `You are an expert IGCSE Physics teacher and examiner.
 Your job is to parse a question paper and map every question to the correct syllabus topic and subtopic.
-You MUST return ONLY a valid JSON object — no preamble, no markdown fences, no explanation.`;
+You MUST return ONLY a valid JSON object — no preamble, no markdown fences, no explanation.
 
-      const userPrompt = `
 SYLLABUS:
 ${sylTextTrimmed}
 
@@ -97,14 +98,10 @@ Return this exact JSON structure:
   "paperInfo": "<grade/exam info if found>"
 }`;
 
-      const message = await client.messages.create({
-        model: "claude-opus-4-5",
-        max_tokens: 8000,
-        messages: [{ role: "user", content: userPrompt }],
-        system: systemPrompt,
-      });
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      let raw = response.text().trim();
 
-      let raw = message.content[0].text.trim();
       // Strip any accidental markdown fences
       raw = raw
         .replace(/^```json\s*/i, "")
@@ -112,8 +109,8 @@ Return this exact JSON structure:
         .replace(/```\s*$/i, "")
         .trim();
 
-      const result = JSON.parse(raw);
-      return res.json({ success: true, data: result });
+      const parsed = JSON.parse(raw);
+      return res.json({ success: true, data: parsed });
 
     } catch (err) {
       console.error("Analysis error:", err);
