@@ -138,15 +138,15 @@ function getQuestionPages(pages) {
 
 // ================= ADAPTIVE CHUNKING =================
 function getChunkSize(totalPages, paperType) {
-  if (paperType === "MCQ") return 4500;
-  if (paperType === "THEORY") return 3500;
-  if (paperType === "PRACTICAL") return 3500;
+  if (paperType === "MCQ") return 2200;
+  if (paperType === "THEORY") return 1800;
+  if (paperType === "PRACTICAL") return 1800;
 
-  if (totalPages <= 5) return 4500;
-  if (totalPages <= 10) return 3800;
-  if (totalPages <= 20) return 3200;
+  if (totalPages <= 5) return 2200;
+  if (totalPages <= 10) return 2000;
+  if (totalPages <= 20) return 1800;
 
-  return 2500;
+  return 1500;
 }
 
 function buildChunks(questionPages, totalPages, paperType) {
@@ -286,9 +286,10 @@ app.post(
       console.log("Total chunks:", chunks.length);
 
       const syllabusText = sylPages
-        .map((p) => `[Page ${p.pageNum}]\n${p.text}`)
-        .join("\n\n")
-        .slice(0, 9000);
+      .slice(0, 3)
+      .map((p) => `[Page ${p.pageNum}]\n${p.text}`)
+      .join("\n\n")
+      .slice(0, 2500);
 
       const groq = new Groq({
         apiKey: process.env.GROQ_API_KEY,
