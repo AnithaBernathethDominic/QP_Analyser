@@ -132,7 +132,7 @@ Return format:
 
         const completion = await groq.chat.completions.create({
           messages: [{ role: "user", content: prompt }],
-          model: "llama-3.3-70b-versatile",
+          model: "mixtral-8x7b-32768",
           temperature: 0.2,
           max_tokens: 4000,
         });
