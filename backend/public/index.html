@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>PhysicsAnalyser — IGCSE Question Paper Mapper</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -146,7 +147,7 @@
   </div>
   <div class="header-actions" id="headerActions" style="display:none">
     <button class="btn btn-ghost" onclick="resetApp()">↩ New Analysis</button>
-    <button class="btn btn-green" onclick="exportCSV()">⬇ Export CSV</button>
+    <button class="btn btn-green" onclick="exportExcel()">⬇ Export Excel</button>
   </div>
 </header>
 
@@ -454,16 +455,85 @@ function switchTab(tab) {
 }
 function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
-// ── Export CSV ────────────────────────────────────────────────────────────────
-function exportCSV() {
+// ── Export Excel (two sheets) ─────────────────────────────────────────────────
+function exportExcel() {
   if (!analysisData) return;
-  const rows = ["Q No,Question,Topic,Subtopic,Answer",
-    ...analysisData.questions.map(r =>
-      `${r.q},"${(r.text||"").replace(/"/g,'""')}","${r.topic}","${r.subtopic}","${r.answer}"`)
+  const wb = XLSX.utils.book_new();
+
+  // ── Sheet 1: Question Mapping ──────────────────────────────────────────────
+  const qRows = [
+    ["Q No", "Question", "Topic", "Subtopic", "Answer"],
+    ...analysisData.questions.map(r => [
+      r.q,
+      r.text || "",
+      r.topic || "",
+      r.subtopic || "",
+      r.answer || ""
+    ])
   ];
-  const blob = new Blob([rows.join("\n")], { type: "text/csv" });
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
-  a.download = "physics_paper_analysis.csv"; a.click();
+  const ws1 = XLSX.utils.aoa_to_sheet(qRows);
+
+  // Column widths for sheet 1
+  ws1["!cols"] = [
+    { wch: 6 },   // Q No
+    { wch: 55 },  // Question
+    { wch: 28 },  // Topic
+    { wch: 35 },  // Subtopic
+    { wch: 8 },   // Answer
+  ];
+
+  // Style header row bold (SheetJS CE supports basic cell props)
+  ["A1","B1","C1","D1","E1"].forEach(cell => {
+    if (ws1[cell]) ws1[cell].s = { font: { bold: true } };
+  });
+
+  XLSX.utils.book_append_sheet(wb, ws1, "Question Mapping");
+
+  // ── Sheet 2: Weightage ─────────────────────────────────────────────────────
+  const total = analysisData.totalQuestions;
+  const weightageRows = [
+    ["Chapter", "No. of Questions", "Marks %", "Subtopic", "Subtopic Question Count"],
+  ];
+
+  const sorted = [...(analysisData.chapterSummary || [])].sort((a, b) => b.count - a.count);
+
+  sorted.forEach(ch => {
+    const subs = ch.subtopics || [];
+    if (subs.length === 0) {
+      weightageRows.push([ch.chapter, ch.count, ch.pct + "%", "", ""]);
+    } else {
+      subs.forEach((s, i) => {
+        if (i === 0) {
+          // First row for this chapter — include chapter info
+          weightageRows.push([ch.chapter, ch.count, ch.pct + "%", s.name, s.count]);
+        } else {
+          // Subsequent subtopic rows — leave chapter columns blank
+          weightageRows.push(["", "", "", s.name, s.count]);
+        }
+      });
+    }
+    // Blank separator row between chapters
+    weightageRows.push(["", "", "", "", ""]);
+  });
+
+  // Summary row at bottom
+  weightageRows.push(["TOTAL", total, "100%", "", ""]);
+
+  const ws2 = XLSX.utils.aoa_to_sheet(weightageRows);
+
+  // Column widths for sheet 2
+  ws2["!cols"] = [
+    { wch: 32 },  // Chapter
+    { wch: 18 },  // No. of Questions
+    { wch: 12 },  // Marks %
+    { wch: 40 },  // Subtopic
+    { wch: 22 },  // Subtopic Question Count
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws2, "Weightage");
+
+  // Download
+  XLSX.writeFile(wb, "physics_paper_analysis.xlsx");
 }
 
 // ── Reset ─────────────────────────────────────────────────────────────────────
