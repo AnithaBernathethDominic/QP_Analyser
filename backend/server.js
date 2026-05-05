@@ -1,9 +1,7 @@
-// ================== FULLY DYNAMIC VERSION ==================
 require("dotenv").config();
 const express = require("express");
 const multer = require("multer");
 const cors = require("cors");
-const path = require("path");
 const Groq = require("groq-sdk");
 
 const app = express();
@@ -12,7 +10,7 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// ---------------- PDF EXTRACTOR ----------------
+// ================= PDF EXTRACT =================
 async function extractPdfPages(buffer) {
   const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
@@ -21,63 +19,99 @@ async function extractPdfPages(buffer) {
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    const text = content.items.map((item) => item.str).join(" ").trim();
+    const text = content.items.map(i => i.str).join(" ").trim();
     pages.push({ pageNum: i, text });
   }
   return pages;
 }
 
-// ---------------- SMART PAGE DETECTION ----------------
-function classifyPage(text) {
-  const lower = text.toLowerCase();
+// ================= PAPER TYPE =================
+function detectPaperType(pages) {
+  const text = pages.slice(0, 3).map(p => p.text).join(" ").toLowerCase();
 
-  if (!text || text.length < 40) return "blank";
+  if (text.includes("multiple choice") || text.includes("paper 2")) return "MCQ";
+  if (text.includes("theory") || text.includes("paper 4")) return "THEORY";
+  if (text.includes("alternative to practical") || text.includes("paper 6")) return "PRACTICAL";
 
-  if (
-    lower.includes("instructions") ||
-    lower.includes("do not write") ||
-    lower.includes("candidate") ||
-    lower.includes("information") ||
-    lower.includes("multiple choice answer sheet")
-  ) return "admin";
-
-  if (/^\s*\d+\s/.test(text) || text.match(/\d+\s+[A-Z]/)) {
-    return "question";
-  }
-
-  return "unknown";
+  return "UNKNOWN";
 }
 
-// ---------------- FILTER QUESTION PAGES ----------------
+// ================= PAGE SCORING =================
+function scorePage(text) {
+  if (!text || text.length < 40) return -10;
+
+  const lower = text.toLowerCase();
+  let score = 0;
+
+  const negative = [
+    "instructions",
+    "information",
+    "candidate",
+    "centre number",
+    "blank page",
+    "do not write",
+    "copyright",
+    "multiple choice answer sheet"
+  ];
+
+  negative.forEach(p => {
+    if (lower.includes(p)) score -= 3;
+  });
+
+  const positive = [
+    /^\s*\d+\s+/m,
+    /\(a\)/,
+    /\(b\)/,
+    /\[\d+\]/,
+    /calculate|state|explain|describe/i,
+    /A\s+.*B\s+.*C\s+.*D/i
+  ];
+
+  positive.forEach(p => {
+    if (p.test(text)) score += 3;
+  });
+
+  if (text.length > 200) score += 1;
+
+  return score;
+}
+
+// ================= GET QUESTION PAGES =================
 function getQuestionPages(pages) {
-  const classified = pages.map(p => ({
+  const scored = pages.map(p => ({
     ...p,
-    type: classifyPage(p.text)
+    score: scorePage(p.text)
   }));
 
-  const qPages = classified.filter(p => p.type === "question");
+  let filtered = scored.filter(p => p.score >= 3);
 
-  // fallback if detection fails
-  return qPages.length > 0 ? qPages : pages;
+  if (filtered.length === 0) filtered = scored.filter(p => p.score > 0);
+  if (filtered.length === 0) filtered = pages;
+
+  return filtered;
 }
 
-// ---------------- DYNAMIC CHUNKING ----------------
-function buildDynamicChunks(pages) {
-  const total = pages.length;
+// ================= CHUNKING =================
+function getChunkSize(totalPages, type) {
+  if (type === "MCQ") return 4500;
+  if (type === "THEORY") return 3500;
+  if (type === "PRACTICAL") return 3500;
 
-  let maxChars;
+  if (totalPages <= 5) return 4500;
+  if (totalPages <= 10) return 3800;
+  if (totalPages <= 20) return 3200;
+  return 2500;
+}
 
-  if (total <= 5) maxChars = 4000;
-  else if (total <= 10) maxChars = 3000;
-  else if (total <= 20) maxChars = 2000;
-  else maxChars = 1500;
+function buildChunks(pages, totalPages, type) {
+  const maxChars = getChunkSize(totalPages, type);
 
   const chunks = [];
   let current = [];
   let len = 0;
 
   for (const p of pages) {
-    if (len + p.text.length > maxChars && current.length > 0) {
+    if (len + p.text.length > maxChars && current.length) {
       chunks.push(current);
       current = [];
       len = 0;
@@ -91,13 +125,12 @@ function buildDynamicChunks(pages) {
   return chunks;
 }
 
-// ---------------- MULTER ----------------
+// ================= MULTER =================
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 30 * 1024 * 1024 },
 });
 
-// ---------------- GROQ CALL ----------------
+// ================= GROQ =================
 async function callGroq(groq, prompt) {
   const res = await groq.chat.completions.create({
     messages: [{ role: "user", content: prompt }],
@@ -105,46 +138,46 @@ async function callGroq(groq, prompt) {
     temperature: 0.1,
   });
 
-  let raw = res.choices[0]?.message?.content || "";
+  let raw = res.choices[0].message.content;
   raw = raw.replace(/```json|```/g, "").trim();
 
   return JSON.parse(raw);
 }
 
-// ---------------- MAIN API ----------------
+// ================= API =================
 app.post(
   "/api/analyse",
   upload.fields([
     { name: "questionPaper", maxCount: 1 },
-    { name: "syllabus", maxCount: 1 },
+    { name: "syllabus", maxCount: 1 }
   ]),
   async (req, res) => {
     try {
-      const qpBuffer = req.files.questionPaper[0].buffer;
-      const sylBuffer = req.files.syllabus[0].buffer;
+      const qp = await extractPdfPages(req.files.questionPaper[0].buffer);
+      const syl = await extractPdfPages(req.files.syllabus[0].buffer);
 
-      const qpPages = await extractPdfPages(qpBuffer);
-      const sylPages = await extractPdfPages(sylBuffer);
+      const type = detectPaperType(qp);
+      console.log("Paper type:", type);
 
-      console.log("Total pages:", qpPages.length);
+      const questionPages = getQuestionPages(qp);
+      console.log("Using pages:", questionPages.map(p => p.pageNum));
 
-      const questionPages = getQuestionPages(qpPages);
-      console.log("Detected question pages:", questionPages.length);
-
-      const chunks = buildDynamicChunks(questionPages);
+      const chunks = buildChunks(questionPages, qp.length, type);
       console.log("Chunks:", chunks.length);
 
-      const syllabusText = sylPages.slice(0, 2).map(p => p.text).join("\n");
+      const sylText = syl.slice(0, 2).map(p => p.text).join("\n");
 
       const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-      let allQuestions = [];
+      let all = [];
 
       for (let i = 0; i < chunks.length; i++) {
         const text = chunks[i].map(p => p.text).join("\n");
 
         const prompt = `
-Extract all questions.
+Paper type: ${type}
+
+Extract questions.
 
 Return JSON:
 [
@@ -152,62 +185,58 @@ Return JSON:
 ]
 
 Syllabus:
-${syllabusText}
+${sylText}
 
 Text:
 ${text}
 `;
 
         const result = await callGroq(groq, prompt);
-        allQuestions.push(...result);
+        all.push(...result);
       }
 
       // remove duplicates
       const seen = new Set();
-      const questions = allQuestions.filter(q => {
+      const questions = all.filter(q => {
         if (seen.has(q.q)) return false;
         seen.add(q.q);
         return true;
       });
 
-      // ---------------- SUMMARY ----------------
-      const chapterMap = {};
-
+      // summary
+      const map = {};
       questions.forEach(q => {
-        if (!chapterMap[q.topic]) {
-          chapterMap[q.topic] = { count: 0 };
-        }
-        chapterMap[q.topic].count++;
+        if (!map[q.topic]) map[q.topic] = { count: 0 };
+        map[q.topic].count++;
       });
 
-      const summary = Object.entries(chapterMap).map(([k, v]) => ({
+      const chapterSummary = Object.entries(map).map(([k, v]) => ({
         chapter: k,
         count: v.count,
-        pct: ((v.count / questions.length) * 100).toFixed(1)
+        pct: (v.count / questions.length) * 100
       }));
 
-      // ---------------- CSV ----------------
-      const csv = [
-        "Q No,Question,Topic,Subtopic",
-        ...questions.map(q =>
-          `${q.q},"${q.text}","${q.topic}","${q.subtopic}"`
-        )
-      ].join("\n");
-
       res.json({
-        questions,
-        summary,
-        csv
+        success: true,
+        data: {
+          totalQuestions: questions.length,
+          questions,
+          chapterSummary,
+          insights: ["Dynamic parsing applied successfully"]
+        }
       });
 
     } catch (err) {
       console.error(err);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ success: false, error: err.message });
     }
   }
 );
 
-// ---------------- SERVER ----------------
-app.listen(PORT, () =>
-  console.log(`Running on http://localhost:${PORT}`)
-);
+// ================= ROOT FIX =================
+app.get("/", (req, res) => {
+  res.send("QP Analyser backend is running");
+});
+
+// ================= START =================
+app.listen(PORT, () => console.log("Server running on", PORT));
