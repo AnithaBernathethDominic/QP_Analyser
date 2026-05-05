@@ -3,6 +3,7 @@ const express = require("express");
 const multer = require("multer");
 const cors = require("cors");
 const Groq = require("groq-sdk");
+const path = require("path");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -233,10 +234,16 @@ ${text}
   }
 );
 
-// ================= ROOT FIX =================
-app.get("/", (req, res) => {
-  res.send("QP Analyser backend is running");
-});
 
-// ================= START =================
-app.listen(PORT, () => console.log("Server running on", PORT));
+
+// ── Serve frontend ─────────────────────────────────────────────────────────────
+app.use(express.static(path.join(__dirname, "public")));
+
+app.get(/.*/, (req, res) =>
+  res.sendFile(path.join(__dirname, "public", "index.html"))
+);
+
+app.listen(PORT, () =>
+  console.log(`PhysicsAnalyser running on http://localhost:${PORT}`)
+);
+
