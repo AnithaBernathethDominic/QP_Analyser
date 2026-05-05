@@ -138,15 +138,11 @@ function getQuestionPages(pages) {
 
 // ================= ADAPTIVE CHUNKING =================
 function getChunkSize(totalPages, paperType) {
-  if (paperType === "MCQ") return 2200;
-  if (paperType === "THEORY") return 1800;
-  if (paperType === "PRACTICAL") return 1800;
+  if (paperType === "MCQ") return 1200;
+  if (paperType === "THEORY") return 1000;
+  if (paperType === "PRACTICAL") return 1000;
 
-  if (totalPages <= 5) return 2200;
-  if (totalPages <= 10) return 2000;
-  if (totalPages <= 20) return 1800;
-
-  return 1500;
+  return 1000;
 }
 
 function buildChunks(questionPages, totalPages, paperType) {
@@ -210,7 +206,7 @@ async function callGroq(groq, prompt, retries = 3) {
         ],
         model: "llama-3.1-8b-instant",
         temperature: 0,
-        max_tokens: 4000,
+        max_tokens: 1200,
         response_format: { type: "json_object" },
       });
 
@@ -289,7 +285,7 @@ app.post(
       .slice(0, 3)
       .map((p) => `[Page ${p.pageNum}]\n${p.text}`)
       .join("\n\n")
-      .slice(0, 2500);
+      .slice(0, 1000);
 
       const groq = new Groq({
         apiKey: process.env.GROQ_API_KEY,
