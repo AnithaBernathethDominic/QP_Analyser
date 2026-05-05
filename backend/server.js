@@ -133,16 +133,54 @@ const upload = multer({
 
 // ================= GROQ =================
 async function callGroq(groq, prompt) {
-  const res = await groq.chat.completions.create({
-    messages: [{ role: "user", content: prompt }],
-    model: "llama-3.1-8b-instant",
-    temperature: 0.1,
-  });
+  async function callGroq(groq, prompt, retries = 3) {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const completion = await groq.chat.completions.create({
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a JSON API. Return ONLY valid JSON. No explanation. No markdown. No text before or after JSON."
+          },
+          {
+            role: "user",
+            content: prompt
+          }
+        ],
+        model: "llama-3.1-8b-instant",
+        temperature: 0,
+        max_tokens: 4000,
+        response_format: { type: "json_object" }
+      });
 
-  let raw = res.choices[0].message.content;
-  raw = raw.replace(/```json|```/g, "").trim();
+      let raw = completion.choices[0]?.message?.content?.trim() || "";
 
-  return JSON.parse(raw);
+      raw = raw
+        .replace(/^```json\s*/i, "")
+        .replace(/^```\s*/i, "")
+        .replace(/```\s*$/i, "")
+        .trim();
+
+      const parsed = JSON.parse(raw);
+
+      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed.questions)) return parsed.questions;
+
+      throw new Error("AI returned JSON but not a questions array.");
+
+    } catch (err) {
+      console.error("Groq JSON error:", err.message);
+
+      if (attempt < retries - 1) {
+        await sleep(3000);
+        continue;
+      }
+
+      throw err;
+    }
+  }
+}
 }
 
 // ================= API =================
@@ -180,10 +218,18 @@ Paper type: ${type}
 
 Extract questions.
 
-Return JSON:
-[
- { "q":1, "text":"...", "topic":"...", "subtopic":"..." }
-]
+Return ONLY this JSON object format:
+{
+  "questions": [
+    {
+      "q": 1,
+      "text": "brief question summary",
+      "topic": "syllabus chapter",
+      "subtopic": "syllabus subtopic",
+      "answer": ""
+    }
+  ]
+}
 
 Syllabus:
 ${sylText}
