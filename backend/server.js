@@ -688,85 +688,89 @@ STRICT RULES:
       }
 
       // ================= CHAPTER SUMMARY FROM FINAL QUESTIONS =================
-      const chapterMap = {};
+      // ================= FORCE FINAL QUESTION NORMALIZATION =================
+const finalQuestions = questions.map((q) => ({
+  q: parseInt(q.q, 10),
+  text: q.text || "",
+  topic: q.topic && q.topic.trim() ? q.topic.trim() : "Unmapped",
+  subtopic: q.subtopic && q.subtopic.trim() ? q.subtopic.trim() : "Unmapped",
+  answer: q.answer || "",
+  marks: q.marks || 1,
+  pageNum: q.pageNum || null,
+}));
 
-      questions.forEach((q) => {
-        const topic = q.topic || "Unmapped";
-        const subtopic = q.subtopic || "Unmapped";
+const totalQuestions = finalQuestions.length;
+const totalMarks = finalQuestions.reduce((sum, q) => sum + (Number(q.marks) || 1), 0);
 
-        if (!chapterMap[topic]) {
-          chapterMap[topic] = {
-            count: 0,
-            subtopics: {},
-          };
-        }
+// ================= CHAPTER SUMMARY FROM ALL FINAL QUESTIONS =================
+const chapterMap = {};
 
-        chapterMap[topic].count++;
+finalQuestions.forEach((q) => {
+  const topic = q.topic || "Unmapped";
+  const subtopic = q.subtopic || "Unmapped";
 
-        subtopic.split("/").forEach((s) => {
-          const key = s.trim();
-
-          if (key) {
-            chapterMap[topic].subtopics[key] =
-              (chapterMap[topic].subtopics[key] || 0) + 1;
-          }
-        });
-      });
-
-      const chapterSummary = Object.entries(chapterMap)
-        .map(([chapter, data]) => ({
-          chapter,
-          count: data.count,
-          pct: parseFloat(((data.count / totalQuestions) * 100).toFixed(1)),
-          subtopics: Object.entries(data.subtopics).map(([name, count]) => ({
-            name,
-            count,
-          })),
-        }))
-        .sort((a, b) => b.count - a.count);
-
-      const top = chapterSummary[0] || {
-        chapter: "N/A",
-        count: 0,
-        pct: 0,
-      };
-
-      const insights = [
-        `Paper type detected: ${paperType}`,
-        `Expected questions detected dynamically: ${
-          expectedQuestionCount || "Unknown"
-        }`,
-        `Actual extracted questions used for report: ${totalQuestions}`,
-        `Missing question numbers after extraction: ${
-          missingNums.length ? missingNums.join(", ") : "None"
-        }`,
-        `Paper processed from ${qpPages.length} pages total.`,
-        `${questionPages.length} question-bearing pages identified dynamically.`,
-        `Heaviest chapter: "${top.chapter}" with ${top.count} questions (${top.pct}% of paper).`,
-        `Total of ${totalQuestions} questions mapped across ${chapterSummary.length} topic chapters.`,
-      ];
-
-      return res.json({
-        success: true,
-        data: {
-          totalQuestions,
-          questions,
-          chapterSummary,
-          insights,
-          paperTitle: "Physics Question Paper",
-          paperInfo: `IGCSE ${paperType}`,
-        },
-      });
-    } catch (err) {
-      console.error("Analysis error:", err);
-
-      return res.status(500).json({
-        success: false,
-        error: err.message || "Analysis failed.",
-      });
-    }
+  if (!chapterMap[topic]) {
+    chapterMap[topic] = {
+      count: 0,
+      marks: 0,
+      subtopics: {},
+    };
   }
-);
+
+  chapterMap[topic].count += 1;
+  chapterMap[topic].marks += Number(q.marks) || 1;
+
+  if (!chapterMap[topic].subtopics[subtopic]) {
+    chapterMap[topic].subtopics[subtopic] = 0;
+  }
+
+  chapterMap[topic].subtopics[subtopic] += 1;
+});
+
+const chapterSummary = Object.entries(chapterMap)
+  .map(([chapter, data]) => ({
+    chapter,
+    count: data.count,
+    marks: data.marks,
+    pct: parseFloat(((data.count / totalQuestions) * 100).toFixed(1)),
+    subtopics: Object.entries(data.subtopics).map(([name, count]) => ({
+      name,
+      count,
+    })),
+  }))
+  .sort((a, b) => b.count - a.count);
+
+const top = chapterSummary[0] || {
+  chapter: "N/A",
+  count: 0,
+  pct: 0,
+};
+
+const insights = [
+  `Paper type detected: ${paperType}`,
+  `Expected questions detected dynamically: ${expectedQuestionCount || "Unknown"}`,
+  `Actual extracted questions used for report: ${totalQuestions}`,
+  `Missing question numbers after extraction: ${
+    missingNums.length ? missingNums.join(", ") : "None"
+  }`,
+  `Paper processed from ${qpPages.length} pages total.`,
+  `${questionPages.length} question-bearing pages identified dynamically.`,
+  `Heaviest chapter: "${top.chapter}" with ${top.count} questions (${top.pct}% of paper).`,
+  `Total of ${totalQuestions} questions mapped across ${chapterSummary.length} topic chapters.`,
+];
+
+return res.json({
+  success: true,
+  data: {
+    totalQuestions,
+    totalMarks,
+    questions: finalQuestions,
+    chapterSummary,
+    insights,
+    paperTitle: "Physics Question Paper",
+    paperInfo: `IGCSE ${paperType}`,
+  },
+});
 
 // ================= SERVE FRONTEND =================
 app.use(express.static(path.join(__dirname, "public")));
