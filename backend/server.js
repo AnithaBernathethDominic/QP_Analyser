@@ -15,21 +15,56 @@ app.use(express.json({ limit: "50mb" }));
 // ================= PDF EXTRACT =================
 async function extractPdfPages(buffer) {
   const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+  const pdf = await pdfjsLib.getDocument({
+    data: new Uint8Array(buffer),
+  }).promise;
+
   const pages = [];
+
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    const text = content.items
-      .map((item) => item.str)
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim();
-    pages.push({ pageNum: i, text });
+
+    const items = content.items
+      .map((item) => ({
+        str: item.str,
+        x: item.transform[4],
+        y: Math.round(item.transform[5]),
+      }))
+      .filter((item) => item.str && item.str.trim());
+
+    items.sort((a, b) => {
+      if (Math.abs(b.y - a.y) > 3) return b.y - a.y;
+      return a.x - b.x;
+    });
+
+    let lines = [];
+    let currentY = null;
+    let currentLine = [];
+
+    for (const item of items) {
+      if (currentY === null || Math.abs(item.y - currentY) <= 3) {
+        currentLine.push(item.str);
+        currentY = item.y;
+      } else {
+        lines.push(currentLine.join(" "));
+        currentLine = [item.str];
+        currentY = item.y;
+      }
+    }
+
+    if (currentLine.length) lines.push(currentLine.join(" "));
+
+    const text = lines.join("\n").trim();
+
+    pages.push({
+      pageNum: i,
+      text,
+    });
   }
+
   return pages;
 }
-
 // ================= PAPER TYPE =================
 function detectPaperType(pages) {
   const text = pages.slice(0, 3).map((p) => p.text).join(" ").toLowerCase();
@@ -137,52 +172,61 @@ function cleanQuestionText(text, qNum) {
 
 function extractMcqQuestionsFromText(pages, expectedCount) {
   const fullText = pages
-    .map((p) => ` <<<PAGE:${p.pageNum}>>> ${p.text}`)
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
+    .map((p) => `\n<<<PAGE:${p.pageNum}>>>\n${p.text}`)
+    .join("\n");
 
   const questions = [];
   if (!expectedCount) return questions;
 
   const starts = [];
-  let searchFrom = 0;
 
   for (let n = 1; n <= expectedCount; n++) {
-    // FIX: match ANY capital letter after question number, not just a fixed word list
     const regex = new RegExp(
-      `(?:^|\\s)${n}[\\.)]?\\s+(?=[A-Z])`,
-      "g"
+      `(?:^|\\n)\\s*${n}[\\.)]?\\s+`,
+      "m"
     );
-    regex.lastIndex = searchFrom;
-    const match = regex.exec(fullText);
+
+    const match = fullText.match(regex);
+
     if (match) {
-      const digitIndex = match[0].search(/\d/);
-      const start = match.index + digitIndex;
-      const beforeText = fullText.slice(0, start);
-      const pageMatches = [...beforeText.matchAll(/<<<PAGE:(\d+)>>>/g)];
-      const lastPage = pageMatches.length
-        ? parseInt(pageMatches[pageMatches.length - 1][1], 10)
-        : null;
-      starts.push({ q: n, start, pageNum: lastPage });
-      searchFrom = start + String(n).length;
+      starts.push({
+        q: n,
+        start: match.index,
+      });
     }
   }
 
   for (let i = 0; i < starts.length; i++) {
     const current = starts[i];
     const next = starts[i + 1];
-    const raw = fullText.slice(current.start, next ? next.start : fullText.length);
-    const text = cleanQuestionText(raw, current.q);
+
+    const raw = fullText.slice(
+      current.start,
+      next ? next.start : fullText.length
+    );
+
+    const pageMatch = raw.match(/<<<PAGE:(\d+)>>>/);
+    const pageNum = pageMatch ? parseInt(pageMatch[1], 10) : null;
+
+    let text = raw
+      .replace(/<<<PAGE:\d+>>>/g, " ")
+      .replace(new RegExp(`^\\s*${current.q}[\\.)]?\\s+`), "")
+      .replace(/Page\s+\d+\s+of\s+\d+/gi, " ")
+      .replace(/© Cambridge University Press & Assessment \d{4}/gi, " ")
+      .replace(/\b0625\/\d+\/[A-Z]\/[A-Z]\/\d+\b/gi, " ")
+      .replace(/\[Turn over\]/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
     if (text) {
       questions.push({
         q: current.q,
-        text,
+        text: text.slice(0, 220),
         topic: "Unmapped",
         subtopic: "Unmapped",
         answer: "",
         marks: 1,
-        pageNum: current.pageNum,
+        pageNum,
       });
     }
   }
