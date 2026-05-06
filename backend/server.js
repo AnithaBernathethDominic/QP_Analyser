@@ -259,9 +259,9 @@ function findQuestionStart(fullText, qNum, fromIndex) {
     const start = match.index + (match[0].startsWith(" ") ? 1 : 0);
     const after = fullText.slice(regex.lastIndex, regex.lastIndex + 900);
 
-    /* if (isLikelyQuestionStart(after)) {
+     if (isLikelyQuestionStart(after)) {
       return start;
-    } */
+    } 
   }
 
   return -1;
