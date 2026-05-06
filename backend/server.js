@@ -43,7 +43,7 @@ function detectPaperType(pages) {
     .join(" ")
     .toLowerCase();
 
-  if (text.includes("multiple choice") || text.includes("paper 2")) {
+  if (text.includes("multiple choice") || text.includes("paper 2") || text.includes("mcqs")) {
     return "MCQ";
   }
 
@@ -51,10 +51,7 @@ function detectPaperType(pages) {
     return "THEORY";
   }
 
-  if (
-    text.includes("alternative to practical") ||
-    text.includes("paper 6")
-  ) {
+  if (text.includes("alternative to practical") || text.includes("paper 6")) {
     return "PRACTICAL";
   }
 
@@ -88,10 +85,10 @@ function scorePage(text) {
   });
 
   const positivePatterns = [
-    /^\s*\d+\s+/m,
-    /\b\d+\s+the diagram shows/i,
-    /\b\d+\s+a student/i,
-    /\b\d+\s+which/i,
+    /^\s*\d+[\.)]\s+/m,
+    /\b\d+[\.)]\s+the diagram shows/i,
+    /\b\d+[\.)]\s+a student/i,
+    /\b\d+[\.)]\s+which/i,
     /\(a\)/i,
     /\(b\)/i,
     /\(i\)/i,
@@ -134,6 +131,83 @@ function getQuestionPages(pages) {
   }
 
   return questionPages;
+}
+
+// ================= EXPECTED QUESTION COUNT =================
+function wordToNumber(word) {
+  const map = {
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+    eleven: 11,
+    twelve: 12,
+    thirteen: 13,
+    fourteen: 14,
+    fifteen: 15,
+    sixteen: 16,
+    seventeen: 17,
+    eighteen: 18,
+    nineteen: 19,
+    twenty: 20,
+    thirty: 30,
+    forty: 40,
+    fifty: 50,
+    sixty: 60,
+  };
+
+  return map[word.toLowerCase()] || null;
+}
+
+function detectExpectedQuestionCount(pages, paperType) {
+  const fullText = pages.map((p) => p.text).join("\n");
+
+  const explicit = fullText.match(/there\s+are\s+([a-z]+|\d+)\s+questions/i);
+  if (explicit) {
+    const val = explicit[1].toLowerCase();
+    return /^\d+$/.test(val) ? parseInt(val, 10) : wordToNumber(val);
+  }
+
+  const totalQuestions = fullText.match(/total\s+number\s+of\s+questions\s*[:\-]?\s*(\d+)/i);
+  if (totalQuestions) {
+    return parseInt(totalQuestions[1], 10);
+  }
+
+  const marks = fullText.match(/maximum\s+marks\s*[:\-]?\s*(\d+)/i);
+  if (paperType === "MCQ" && marks) {
+    return parseInt(marks[1], 10);
+  }
+
+  const nums = [];
+  const regex = /(?:^|\n|\s)(\d{1,3})[\.)]\s+/g;
+  let match;
+
+  while ((match = regex.exec(fullText)) !== null) {
+    const n = parseInt(match[1], 10);
+    if (n > 0 && n < 200) nums.push(n);
+  }
+
+  return nums.length ? Math.max(...nums) : null;
+}
+
+function extractMissingMcqQuestion(fullText, qNum, expectedCount) {
+  const nextPart =
+    qNum < expectedCount
+      ? `(?=\\s+${qNum + 1}[\\.)]\\s+)`
+      : `(?=$)`;
+
+  const regex = new RegExp(`${qNum}[\\.)]\\s+([\\s\\S]*?)${nextPart}`, "m");
+  const match = fullText.match(regex);
+
+  if (!match || !match[1]) return null;
+
+  return match[1].replace(/\s+/g, " ").trim().slice(0, 220);
 }
 
 // ================= ADAPTIVE CHUNKING =================
@@ -220,13 +294,8 @@ async function callGroq(groq, prompt, retries = 3) {
 
       const parsed = JSON.parse(raw);
 
-      if (Array.isArray(parsed.questions)) {
-        return parsed.questions;
-      }
-
-      if (Array.isArray(parsed)) {
-        return parsed;
-      }
+      if (Array.isArray(parsed.questions)) return parsed.questions;
+      if (Array.isArray(parsed)) return parsed;
 
       return [];
     } catch (err) {
@@ -266,9 +335,11 @@ app.post(
       ]);
 
       const paperType = detectPaperType(qpPages);
+      const expectedQuestionCount = detectExpectedQuestionCount(qpPages, paperType);
 
       console.log("QP total pages:", qpPages.length);
       console.log("Detected paper type:", paperType);
+      console.log("Expected question count:", expectedQuestionCount || "Unknown");
 
       const questionPages = getQuestionPages(qpPages);
 
@@ -282,10 +353,10 @@ app.post(
       console.log("Total chunks:", chunks.length);
 
       const syllabusText = sylPages
-      .slice(0, 3)
-      .map((p) => `[Page ${p.pageNum}]\n${p.text}`)
-      .join("\n\n")
-      .slice(0, 1000);
+        .slice(0, 3)
+        .map((p) => `[Page ${p.pageNum}]\n${p.text}`)
+        .join("\n\n")
+        .slice(0, 1000);
 
       const groq = new Groq({
         apiKey: process.env.GROQ_API_KEY,
@@ -302,13 +373,14 @@ app.post(
 You are an IGCSE Physics question paper parser.
 
 Paper type detected: ${paperType}
+Expected question count, if detected: ${expectedQuestionCount || "Unknown"}
 
 Return ONLY this JSON object format:
 {
   "questions": [
     {
       "q": 1,
-      "text": "brief question summary under 120 characters",
+      "text": "brief question summary under 100 characters",
       "topic": "IGCSE syllabus chapter",
       "subtopic": "IGCSE syllabus subtopic",
       "answer": ""
@@ -325,7 +397,8 @@ ${chunkText}
 STRICT RULES:
 - Return only valid JSON object.
 - Use the key "questions".
-- For MCQ Paper 2, extract every question separately, usually 1 to 40.
+- Extract every visible main question number in this chunk.
+- For MCQ Paper 2, extract every MCQ question separately.
 - For Theory Paper 4, group subparts under the main question number.
 - For Practical Paper 6, group experiment tasks under the main question number.
 - q must be the exact main question number.
@@ -346,6 +419,33 @@ STRICT RULES:
 
         if (i < chunks.length - 1) {
           await sleep(2000);
+        }
+      }
+
+      // ================= DYNAMIC MCQ FALLBACK =================
+      if (paperType === "MCQ" && expectedQuestionCount) {
+        const fullQpText = questionPages.map((p) => p.text).join("\n");
+
+        for (let n = 1; n <= expectedQuestionCount; n++) {
+          const exists = allQuestions.some((q) => parseInt(q.q, 10) === n);
+
+          if (!exists) {
+            const fallbackText = extractMissingMcqQuestion(
+              fullQpText,
+              n,
+              expectedQuestionCount
+            );
+
+            if (fallbackText) {
+              allQuestions.push({
+                q: n,
+                text: fallbackText,
+                topic: "Unmapped",
+                subtopic: "Unmapped",
+                answer: "",
+              });
+            }
+          }
         }
       }
 
@@ -382,6 +482,16 @@ STRICT RULES:
         });
       }
 
+      const missingNums = [];
+
+      if (paperType === "MCQ" && expectedQuestionCount) {
+        const extractedNums = questions.map((q) => q.q);
+
+        for (let n = 1; n <= expectedQuestionCount; n++) {
+          if (!extractedNums.includes(n)) missingNums.push(n);
+        }
+      }
+
       const chapterMap = {};
 
       questions.forEach((q) => {
@@ -399,6 +509,7 @@ STRICT RULES:
 
         subtopic.split("/").forEach((s) => {
           const key = s.trim();
+
           if (key) {
             chapterMap[topic].subtopics[key] =
               (chapterMap[topic].subtopics[key] || 0) + 1;
@@ -426,6 +537,12 @@ STRICT RULES:
 
       const insights = [
         `Paper type detected: ${paperType}`,
+        `Expected questions detected dynamically: ${
+          expectedQuestionCount || "Unknown"
+        }`,
+        `Missing question numbers after fallback: ${
+          missingNums.length ? missingNums.join(", ") : "None"
+        }`,
         `Paper processed from ${qpPages.length} pages total.`,
         `${questionPages.length} question-bearing pages identified dynamically.`,
         `Heaviest chapter: "${top.chapter}" with ${top.count} questions (${top.pct}% of paper).`,
