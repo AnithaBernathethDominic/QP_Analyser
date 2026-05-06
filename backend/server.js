@@ -221,51 +221,32 @@ function cleanQuestionText(text, qNum) {
 function isLikelyQuestionStart(afterText) {
   const s = afterText.replace(/\s+/g, " ").trim();
 
-  if (s.length < 8) return false;
+  if (s.length < 12) return false;
 
-  const starters = [
-    /^A student\b/i,
-    /^A beam\b/i,
-    /^A hole\b/i,
-    /^A man\b/i,
-    /^A car\b/i,
-    /^A ball\b/i,
-    /^A submarine\b/i,
-    /^A marble\b/i,
-    /^A helicopter\b/i,
-    /^A shopper\b/i,
-    /^A footballer\b/i,
-    /^A gas\b/i,
-    /^A ray\b/i,
-    /^A real image\b/i,
-    /^A soft-iron\b/i,
-    /^A transformer\b/i,
-    /^A nuclide\b/i,
-    /^A satellite\b/i,
-    /^An object\b/i,
-    /^An athlete\b/i,
-    /^An outdoor\b/i,
-    /^Both\b/i,
-    /^Equal\b/i,
-    /^Graph\b/i,
-    /^Identify\b/i,
-    /^Intruder\b/i,
-    /^It is possible\b/i,
-    /^One nuclear\b/i,
-    /^The diagram\b/i,
-    /^The graph\b/i,
-    /^The circuit\b/i,
-    /^The reading\b/i,
-    /^The density\b/i,
-    /^The transformer\b/i,
-    /^Three suggestions\b/i,
-    /^Two identical\b/i,
-    /^Uranium\b/i,
-    /^What\b/i,
-    /^Which\b/i,
+  const badStarts = [
+    /^©/i,
+    /^cambridge/i,
+    /^university/i,
+    /^press/i,
+    /^assessment/i,
+    /^permission/i,
+    /^page\s+\d+/i,
+    /^of\s+\d+/i,
+    /^\/\s*s/i,
   ];
 
-  return starters.some((r) => r.test(s));
+  if (badStarts.some((r) => r.test(s))) return false;
+
+  const firstWords = s.slice(0, 160);
+
+  const looksLikeQuestion =
+    /^(A|An|The|Which|What|Why|How|Both|Equal|One|Two|Three|Identify|Intruder|Uranium|Graph)/i.test(firstWords) ||
+    /\b(which|what|why|how|calculate|state|explain|describe|identify)\b/i.test(firstWords);
+
+  const hasMcqOptions =
+    /\sA\s+[\s\S]{1,120}\sB\s+[\s\S]{1,120}\sC\s+[\s\S]{1,120}\sD\s+/i.test(s.slice(0, 900));
+
+  return looksLikeQuestion || hasMcqOptions;
 }
 
 function findQuestionStart(fullText, qNum, fromIndex) {
@@ -275,8 +256,8 @@ function findQuestionStart(fullText, qNum, fromIndex) {
   let match;
 
   while ((match = regex.exec(fullText)) !== null) {
-    const start = match.index + (match[0].match(/^\s/) ? 1 : 0);
-    const after = fullText.slice(regex.lastIndex, regex.lastIndex + 160);
+    const start = match.index + (match[0].startsWith(" ") ? 1 : 0);
+    const after = fullText.slice(regex.lastIndex, regex.lastIndex + 900);
 
     if (isLikelyQuestionStart(after)) {
       return start;
@@ -287,7 +268,12 @@ function findQuestionStart(fullText, qNum, fromIndex) {
 }
 
 function extractMcqQuestionsFromText(pages, expectedCount) {
-  let fullText = pages.map((p) => p.text).join("\n");
+  let fullText = pages
+    .map((p) => p.text)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   fullText = removeBoilerplate(fullText);
 
   const questions = [];
@@ -308,6 +294,7 @@ function extractMcqQuestionsFromText(pages, expectedCount) {
   for (let i = 0; i < starts.length; i++) {
     const current = starts[i];
     const next = starts[i + 1];
+
     const raw = fullText.slice(
       current.start,
       next ? next.start : fullText.length
