@@ -699,7 +699,7 @@ const finalQuestions = questions.map((q) => ({
   pageNum: q.pageNum || null,
 }));
 
-const totalQuestions = finalQuestions.length;
+const totalQuestions1 = finalQuestions.length;
 const totalMarks = finalQuestions.reduce((sum, q) => sum + (Number(q.marks) || 1), 0);
 
 // ================= CHAPTER SUMMARY FROM ALL FINAL QUESTIONS =================
@@ -732,7 +732,7 @@ const chapterSummary = Object.entries(chapterMap)
     chapter,
     count: data.count,
     marks: data.marks,
-    pct: parseFloat(((data.count / totalQuestions) * 100).toFixed(1)),
+    pct: parseFloat(((data.count / totalQuestions1) * 100).toFixed(1)),
     subtopics: Object.entries(data.subtopics).map(([name, count]) => ({
       name,
       count,
@@ -749,20 +749,20 @@ const top = chapterSummary[0] || {
 const insights = [
   `Paper type detected: ${paperType}`,
   `Expected questions detected dynamically: ${expectedQuestionCount || "Unknown"}`,
-  `Actual extracted questions used for report: ${totalQuestions}`,
+  `Actual extracted questions used for report: ${totalQuestions1}`,
   `Missing question numbers after extraction: ${
     missingNums.length ? missingNums.join(", ") : "None"
   }`,
   `Paper processed from ${qpPages.length} pages total.`,
   `${questionPages.length} question-bearing pages identified dynamically.`,
   `Heaviest chapter: "${top.chapter}" with ${top.count} questions (${top.pct}% of paper).`,
-  `Total of ${totalQuestions} questions mapped across ${chapterSummary.length} topic chapters.`,
+  `Total of ${totalQuestions1} questions mapped across ${chapterSummary.length} topic chapters.`,
 ];
 
 return res.json({
   success: true,
   data: {
-    totalQuestions,
+    totalQuestions1,
     totalMarks,
     questions: finalQuestions,
     chapterSummary,
