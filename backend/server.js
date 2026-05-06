@@ -259,35 +259,52 @@ function findQuestionStart(fullText, qNum, fromIndex) {
     const start = match.index + (match[0].startsWith(" ") ? 1 : 0);
     const after = fullText.slice(regex.lastIndex, regex.lastIndex + 900);
 
-    if (isLikelyQuestionStart(after)) {
+    /* if (isLikelyQuestionStart(after)) {
       return start;
-    }
+    } */
   }
 
   return -1;
 }
 
 function extractMcqQuestionsFromText(pages, expectedCount) {
-  let fullText = pages
-    .map((p) => p.text)
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  fullText = removeBoilerplate(fullText);
+  const fullText = pages
+    .map((p) => `\n<<<PAGE:${p.pageNum}>>>\n${p.text}`)
+    .join("\n")
+    .replace(/\r/g, "\n");
 
   const questions = [];
+
   if (!expectedCount) return questions;
 
   const starts = [];
-  let searchFrom = 0;
 
   for (let n = 1; n <= expectedCount; n++) {
-    const start = findQuestionStart(fullText, n, searchFrom);
+    const regex = new RegExp(
+      `(?:^|\\n)\\s*${n}[\\.)]?\\s+`,
+      "g"
+    );
 
-    if (start !== -1) {
-      starts.push({ q: n, start });
-      searchFrom = start + String(n).length;
+    let match;
+    let found = null;
+
+    while ((match = regex.exec(fullText)) !== null) {
+      const pos = match.index;
+      const after = fullText.slice(regex.lastIndex, regex.lastIndex + 120);
+
+      if (
+        after.trim().length > 10 &&
+        !after.toLowerCase().startsWith("page") &&
+        !after.toLowerCase().startsWith("©") &&
+        !after.toLowerCase().startsWith("cambridge")
+      ) {
+        found = pos;
+        break;
+      }
+    }
+
+    if (found !== null) {
+      starts.push({ q: n, start: found });
     }
   }
 
@@ -300,12 +317,24 @@ function extractMcqQuestionsFromText(pages, expectedCount) {
       next ? next.start : fullText.length
     );
 
-    const text = cleanQuestionText(raw, current.q);
+    const pageMatch = raw.match(/<<<PAGE:(\d+)>>>/);
+    const pageNum = pageMatch ? parseInt(pageMatch[1], 10) : null;
+
+    const text = raw
+      .replace(/<<<PAGE:\d+>>>/g, " ")
+      .replace(new RegExp(`^\\s*${current.q}[\\.)]?\\s+`), "")
+      .replace(/Page\s+\d+\s+of\s+\d+/gi, " ")
+      .replace(/© Cambridge University Press & Assessment \d{4}/gi, " ")
+      .replace(/\b0625\/\d+\/[A-Z]\/[A-Z]\/\d+\b/gi, " ")
+      .replace(/\[Turn over\]/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
     if (text) {
       questions.push({
         q: current.q,
-        text,
+        text: text.slice(0, 350),
+        pageNum,
         topic: "Unmapped",
         subtopic: "Unmapped",
         answer: "",
@@ -535,7 +564,7 @@ app.post(
       // ================= MCQ: SERVER EXTRACTS, AI ONLY MAPS =================
       if (paperType === "MCQ") {
         const serverExtracted = extractMcqQuestionsFromText(
-          questionPages,
+          qpPages,
           expectedQuestionCount
         );
 
