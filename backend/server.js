@@ -37,11 +37,7 @@ async function extractPdfPages(buffer) {
 
 // ================= PAPER TYPE DETECTION =================
 function detectPaperType(pages) {
-  const text = pages
-    .slice(0, 3)
-    .map((p) => p.text)
-    .join(" ")
-    .toLowerCase();
+  const text = pages.slice(0, 3).map((p) => p.text).join(" ").toLowerCase();
 
   if (
     text.includes("multiple choice") ||
@@ -55,10 +51,7 @@ function detectPaperType(pages) {
     return "THEORY";
   }
 
-  if (
-    text.includes("alternative to practical") ||
-    text.includes("paper 6")
-  ) {
+  if (text.includes("alternative to practical") || text.includes("paper 6")) {
     return "PRACTICAL";
   }
 
@@ -77,7 +70,6 @@ function scorePage(text) {
   const negativePatterns = [
     "blank page",
     "instructions",
-    "information",
     "candidate name",
     "centre number",
     "candidate number",
@@ -174,10 +166,7 @@ function wordToNumber(word) {
 function detectExpectedQuestionCount(pages, paperType) {
   const fullText = pages.map((p) => p.text).join("\n");
 
-  const explicit = fullText.match(
-    /there\s+are\s+([a-z]+|\d+)\s+questions/i
-  );
-
+  const explicit = fullText.match(/there\s+are\s+([a-z]+|\d+)\s+questions/i);
   if (explicit) {
     const val = explicit[1].toLowerCase();
     return /^\d+$/.test(val) ? parseInt(val, 10) : wordToNumber(val);
@@ -186,19 +175,13 @@ function detectExpectedQuestionCount(pages, paperType) {
   const totalQuestions = fullText.match(
     /total\s+number\s+of\s+questions\s*[:\-]?\s*(\d+)/i
   );
-
-  if (totalQuestions) {
-    return parseInt(totalQuestions[1], 10);
-  }
+  if (totalQuestions) return parseInt(totalQuestions[1], 10);
 
   const marks = fullText.match(/maximum\s+marks\s*[:\-]?\s*(\d+)/i);
-
-  if (paperType === "MCQ" && marks) {
-    return parseInt(marks[1], 10);
-  }
+  if (paperType === "MCQ" && marks) return parseInt(marks[1], 10);
 
   const nums = [];
-  const regex = /(?:^|\n|\s)(\d{1,3})[\.)]?\s+(?=[A-Z])/g;
+  const regex = /(?:^|\s)(\d{1,3})[\.)]?\s+(?=[A-Z])/g;
   let match;
 
   while ((match = regex.exec(fullText)) !== null) {
@@ -209,39 +192,133 @@ function detectExpectedQuestionCount(pages, paperType) {
   return nums.length ? Math.max(...nums) : null;
 }
 
-// ================= MCQ EXTRACTION =================
+// ================= TEXT CLEANING =================
+function removeBoilerplate(text) {
+  return text
+    .replace(/Permission to reproduce[\s\S]*?0625\/22\/F\/M\/26/gi, " ")
+    .replace(/© Cambridge University Press & Assessment \d{4}/gi, " ")
+    .replace(/\b0625\/\d+\/[A-Z]\/[A-Z]\/\d+\b/gi, " ")
+    .replace(/\[Turn over\]/gi, " ")
+    .replace(/\*[\d\s]+\*/g, " ")
+    .replace(/Page\s+\d+\s+of\s+\d+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanQuestionText(text, qNum) {
+  return text
+    .replace(new RegExp(`^${qNum}[\\.)]?\\s+`), "")
+    .replace(/© Cambridge University Press & Assessment \d{4}/gi, " ")
+    .replace(/\b0625\/\d+\/[A-Z]\/[A-Z]\/\d+\b/gi, " ")
+    .replace(/\[Turn over\]/gi, " ")
+    .replace(/Page\s+\d+\s+of\s+\d+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 350);
+}
+
+// ================= ROBUST MCQ EXTRACTION =================
+function isLikelyQuestionStart(afterText) {
+  const s = afterText.replace(/\s+/g, " ").trim();
+
+  if (s.length < 8) return false;
+
+  const starters = [
+    /^A student\b/i,
+    /^A beam\b/i,
+    /^A hole\b/i,
+    /^A man\b/i,
+    /^A car\b/i,
+    /^A ball\b/i,
+    /^A submarine\b/i,
+    /^A marble\b/i,
+    /^A helicopter\b/i,
+    /^A shopper\b/i,
+    /^A footballer\b/i,
+    /^A gas\b/i,
+    /^A ray\b/i,
+    /^A real image\b/i,
+    /^A soft-iron\b/i,
+    /^A transformer\b/i,
+    /^A nuclide\b/i,
+    /^A satellite\b/i,
+    /^An object\b/i,
+    /^An athlete\b/i,
+    /^An outdoor\b/i,
+    /^Both\b/i,
+    /^Equal\b/i,
+    /^Graph\b/i,
+    /^Identify\b/i,
+    /^Intruder\b/i,
+    /^It is possible\b/i,
+    /^One nuclear\b/i,
+    /^The diagram\b/i,
+    /^The graph\b/i,
+    /^The circuit\b/i,
+    /^The reading\b/i,
+    /^The density\b/i,
+    /^The transformer\b/i,
+    /^Three suggestions\b/i,
+    /^Two identical\b/i,
+    /^Uranium\b/i,
+    /^What\b/i,
+    /^Which\b/i,
+  ];
+
+  return starters.some((r) => r.test(s));
+}
+
+function findQuestionStart(fullText, qNum, fromIndex) {
+  const regex = new RegExp(`(?:^|\\s)${qNum}[\\.)]?\\s+`, "g");
+  regex.lastIndex = fromIndex;
+
+  let match;
+
+  while ((match = regex.exec(fullText)) !== null) {
+    const start = match.index + (match[0].match(/^\s/) ? 1 : 0);
+    const after = fullText.slice(regex.lastIndex, regex.lastIndex + 160);
+
+    if (isLikelyQuestionStart(after)) {
+      return start;
+    }
+  }
+
+  return -1;
+}
+
 function extractMcqQuestionsFromText(pages, expectedCount) {
-  const fullText = pages
-    .map((p) => p.text)
-    .join("\n")
-    .replace(/\r/g, "\n");
+  let fullText = pages.map((p) => p.text).join("\n");
+  fullText = removeBoilerplate(fullText);
 
   const questions = [];
-
   if (!expectedCount) return questions;
 
-  for (let n = 1; n <= expectedCount; n++) {
-    const nextPart =
-      n < expectedCount
-        ? `(?=\\s+${n + 1}[\\.)]?\\s+)`
-        : `(?=$)`;
+  const starts = [];
+  let searchFrom = 0;
 
-    const regex = new RegExp(
-      `${n}[\\.)]?\\s+([\\s\\S]*?)${nextPart}`,
-      "m"
+  for (let n = 1; n <= expectedCount; n++) {
+    const start = findQuestionStart(fullText, n, searchFrom);
+
+    if (start !== -1) {
+      starts.push({ q: n, start });
+      searchFrom = start + String(n).length;
+    }
+  }
+
+  for (let i = 0; i < starts.length; i++) {
+    const current = starts[i];
+    const next = starts[i + 1];
+    const raw = fullText.slice(
+      current.start,
+      next ? next.start : fullText.length
     );
 
-    const match = fullText.match(regex);
+    const text = cleanQuestionText(raw, current.q);
 
-    if (match && match[1]) {
-      let text = match[1]
-        .replace(/\s+/g, " ")
-        .replace(/Page\s+\d+\s+of\s+\d+/gi, "")
-        .trim();
-
+    if (text) {
       questions.push({
-        q: n,
-        text: text.slice(0, 300),
+        q: current.q,
+        text,
         topic: "Unmapped",
         subtopic: "Unmapped",
         answer: "",
@@ -257,7 +334,6 @@ function getChunkSize(totalPages, paperType) {
   if (paperType === "MCQ") return 1400;
   if (paperType === "THEORY") return 1000;
   if (paperType === "PRACTICAL") return 1000;
-
   return 1000;
 }
 
@@ -293,11 +369,8 @@ const upload = multer({
     fileSize: 30 * 1024 * 1024,
   },
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === "application/pdf") {
-      cb(null, true);
-    } else {
-      cb(new Error("Only PDF files are allowed."));
-    }
+    if (file.mimetype === "application/pdf") cb(null, true);
+    else cb(new Error("Only PDF files are allowed."));
   },
 });
 
@@ -322,7 +395,7 @@ async function callGroq(groq, prompt, retries = 3) {
         ],
         model: "llama-3.1-8b-instant",
         temperature: 0,
-        max_tokens: 1200,
+        max_tokens: 900,
         response_format: { type: "json_object" },
       });
 
@@ -359,7 +432,7 @@ async function callGroq(groq, prompt, retries = 3) {
 // ================= AI TOPIC MAPPING FOR MCQ =================
 async function mapMcqTopicsWithAI(groq, questions, syllabusText) {
   const mapped = [];
-  const batchSize = 8;
+  const batchSize = 6;
 
   for (let i = 0; i < questions.length; i += batchSize) {
     const batch = questions.slice(i, i + batchSize);
@@ -382,9 +455,7 @@ SYLLABUS REFERENCE:
 ${syllabusText}
 
 QUESTIONS TO MAP:
-${batch
-  .map((q) => `Q${q.q}: ${q.text}`)
-  .join("\n")}
+${batch.map((q) => `Q${q.q}: ${q.text}`).join("\n")}
 
 STRICT RULES:
 - Do not create new question numbers.
@@ -393,26 +464,29 @@ STRICT RULES:
 - Return valid JSON only.
 `;
 
-    const result = await callGroq(groq, prompt);
+    try {
+      const result = await callGroq(groq, prompt);
 
-    const resultMap = new Map();
-    result.forEach((r) => {
-      const qNum = parseInt(r.q, 10);
-      if (!Number.isNaN(qNum)) {
-        resultMap.set(qNum, r);
-      }
-    });
-
-    batch.forEach((q) => {
-      const ai = resultMap.get(q.q);
-
-      mapped.push({
-        ...q,
-        topic: ai?.topic || q.topic || "Unmapped",
-        subtopic: ai?.subtopic || q.subtopic || "Unmapped",
-        answer: q.answer || "",
+      const resultMap = new Map();
+      result.forEach((r) => {
+        const qNum = parseInt(r.q, 10);
+        if (!Number.isNaN(qNum)) resultMap.set(qNum, r);
       });
-    });
+
+      batch.forEach((q) => {
+        const ai = resultMap.get(q.q);
+
+        mapped.push({
+          ...q,
+          topic: ai?.topic || q.topic || "Unmapped",
+          subtopic: ai?.subtopic || q.subtopic || "Unmapped",
+          answer: q.answer || "",
+        });
+      });
+    } catch (err) {
+      console.error("Topic mapping batch failed:", err.message);
+      batch.forEach((q) => mapped.push(q));
+    }
 
     if (i + batchSize < questions.length) {
       await sleep(1500);
@@ -587,7 +661,6 @@ STRICT RULES:
         });
       }
 
-      // ================= MISSING QUESTION CHECK =================
       const missingNums = [];
 
       if (paperType === "MCQ" && expectedQuestionCount) {
@@ -628,15 +701,11 @@ STRICT RULES:
         .map(([chapter, data]) => ({
           chapter,
           count: data.count,
-          pct: parseFloat(
-            ((data.count / totalQuestions) * 100).toFixed(1)
-          ),
-          subtopics: Object.entries(data.subtopics).map(
-            ([name, count]) => ({
-              name,
-              count,
-            })
-          ),
+          pct: parseFloat(((data.count / totalQuestions) * 100).toFixed(1)),
+          subtopics: Object.entries(data.subtopics).map(([name, count]) => ({
+            name,
+            count,
+          })),
         }))
         .sort((a, b) => b.count - a.count);
 
@@ -652,7 +721,7 @@ STRICT RULES:
           expectedQuestionCount || "Unknown"
         }`,
         `Actual extracted questions used for report: ${totalQuestions}`,
-        `Missing question numbers after fallback: ${
+        `Missing question numbers after extraction: ${
           missingNums.length ? missingNums.join(", ") : "None"
         }`,
         `Paper processed from ${qpPages.length} pages total.`,
