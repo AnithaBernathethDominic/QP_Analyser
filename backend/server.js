@@ -15,21 +15,54 @@ app.use(express.json({ limit: "50mb" }));
 // ================= PDF EXTRACT =================
 async function extractPdfPages(buffer) {
   const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+  const pdf = await pdfjsLib.getDocument({
+    data: new Uint8Array(buffer),
+  }).promise;
+
   const pages = [];
+
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    const text = content.items
-      .map((item) => item.str)
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim();
-    pages.push({ pageNum: i, text });
+
+    const items = content.items
+      .map((item) => ({
+        str: item.str,
+        x: item.transform[4],
+        y: Math.round(item.transform[5]),
+      }))
+      .filter((item) => item.str && item.str.trim());
+
+    items.sort((a, b) => {
+      if (Math.abs(b.y - a.y) > 3) return b.y - a.y;
+      return a.x - b.x;
+    });
+
+    const lines = [];
+    let currentY = null;
+    let currentLine = [];
+
+    for (const item of items) {
+      if (currentY === null || Math.abs(item.y - currentY) <= 3) {
+        currentLine.push(item.str);
+        currentY = item.y;
+      } else {
+        lines.push(currentLine.join(" "));
+        currentLine = [item.str];
+        currentY = item.y;
+      }
+    }
+
+    if (currentLine.length) lines.push(currentLine.join(" "));
+
+    pages.push({
+      pageNum: i,
+      text: lines.join("\n").trim(),
+    });
   }
+
   return pages;
 }
-
 // ================= PAPER TYPE =================
 function detectPaperType(pages) {
   const text = pages.slice(0, 3).map((p) => p.text).join(" ").toLowerCase();
@@ -143,56 +176,49 @@ function extractMcqQuestionsFromText(pages, expectedCount) {
   const questions = [];
   if (!expectedCount) return questions;
 
-  const startRegex =
-    /(?:^|\n)\s*(\d{1,3})[\.)]?\s+(?=(A|An|The|Which|What|Why|How|Identify|Calculate|State|Explain|Describe|Both|Equal|One|Two|Three|Uranium|Intruder)\b)/g;
-
-  const candidates = [];
-  let match;
-
-  while ((match = startRegex.exec(fullText)) !== null) {
-    const qNum = parseInt(match[1], 10);
-
-    if (qNum >= 1 && qNum <= expectedCount) {
-      const before = fullText.slice(0, match.index);
-      const pageMatches = [...before.matchAll(/<<<PAGE:(\d+)>>>/g)];
-      const pageNum = pageMatches.length
-        ? parseInt(pageMatches[pageMatches.length - 1][1], 10)
-        : null;
-
-      candidates.push({
-        q: qNum,
-        start: match.index,
-        pageNum,
-      });
-    }
-  }
-
   const starts = [];
-  const seen = new Set();
+  let cursor = 0;
 
-  candidates
-    .sort((a, b) => a.start - b.start)
-    .forEach((c) => {
-      if (!seen.has(c.q)) {
-        seen.add(c.q);
-        starts.push(c);
-      }
+  for (let n = 1; n <= expectedCount; n++) {
+    const regex = new RegExp(
+      `(?:^|\\n)\\s*${n}[\\.)]?\\s+`,
+      "g"
+    );
+
+    regex.lastIndex = cursor;
+
+    let match = regex.exec(fullText);
+
+    if (!match) {
+      console.log(`Question ${n} not found`);
+      continue;
+    }
+
+    const before = fullText.slice(0, match.index);
+    const pageMatches = [...before.matchAll(/<<<PAGE:(\d+)>>>/g)];
+    const pageNum = pageMatches.length
+      ? parseInt(pageMatches[pageMatches.length - 1][1], 10)
+      : null;
+
+    starts.push({
+      q: n,
+      start: match.index,
+      pageNum,
     });
 
-  starts.sort((a, b) => a.q - b.q);
+    cursor = match.index + match[0].length;
+  }
 
   for (let i = 0; i < starts.length; i++) {
     const current = starts[i];
-
-    const next =
-      starts.find((s) => s.q === current.q + 1) || null;
+    const next = starts[i + 1];
 
     const raw = fullText.slice(
       current.start,
       next ? next.start : fullText.length
     );
 
-    let text = raw
+    const text = raw
       .replace(/<<<PAGE:\d+>>>/g, " ")
       .replace(new RegExp(`^\\s*${current.q}[\\.)]?\\s+`), "")
       .replace(/Page\s+\d+\s+of\s+\d+/gi, " ")
@@ -218,7 +244,6 @@ function extractMcqQuestionsFromText(pages, expectedCount) {
 
   return questions;
 }
-
 // ================= CHUNKING =================
 function getChunkSize(totalPages, paperType) {
   if (paperType === "MCQ") return 1400;
