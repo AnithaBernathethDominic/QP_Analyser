@@ -65,19 +65,25 @@ async function extractPdfPages(buffer) {
 }
 // ================= PAPER TYPE =================
 function detectPaperType(pages) {
-  const text = pages.slice(0, 3).map((p) => p.text).join(" ").toLowerCase();
-  if (text.includes("multiple choice") || text.includes("paper 2") || text.includes("mcqs")) {
+  const text = pages.slice(0, 3).map(p => p.text).join(" ").toLowerCase();
+
+  if (
+    text.includes("multiple choice") ||
+    text.includes("paper 2") ||
+    text.includes("mcq") ||
+    text.includes("mcqs")
+  ) {
     return "MCQ";
   }
-  if (text.includes("theory") || text.includes("paper 4")) {
-    return "THEORY";
-  }
+
+  if (text.includes("theory") || text.includes("paper 4")) return "THEORY";
+
   if (text.includes("alternative to practical") || text.includes("paper 6")) {
     return "PRACTICAL";
   }
+
   return "UNKNOWN";
 }
-
 // ================= QUESTION PAGE DETECTION =================
 function scorePage(text) {
   if (!text || text.trim().length < 40) return -10;
@@ -127,31 +133,43 @@ function wordToNumber(word) {
 }
 
 function detectExpectedQuestionCount(pages, paperType) {
-  const fullText = pages.map((p) => p.text).join(" ");
+  const fullText = pages.map(p => p.text).join(" ");
+
+  const wordNums = {
+    one: 1, two: 2, three: 3, four: 4, five: 5,
+    six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+    eleven: 11, twelve: 12, thirteen: 13, fourteen: 14,
+    fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18,
+    nineteen: 19, twenty: 20, thirty: 30, forty: 40,
+    fifty: 50, sixty: 60
+  };
 
   const explicit = fullText.match(/there\s+are\s+([a-z]+|\d+)\s+questions/i);
   if (explicit) {
     const val = explicit[1].toLowerCase();
-    return /^\d+$/.test(val) ? parseInt(val, 10) : wordToNumber(val);
+    return /^\d+$/.test(val) ? parseInt(val, 10) : wordNums[val] || null;
   }
 
-  const totalMatch = fullText.match(/total\s+number\s+of\s+questions\s*[:\-]?\s*(\d+)/i);
-  if (totalMatch) return parseInt(totalMatch[1], 10);
+  const totalQuestions = fullText.match(/total\s+number\s+of\s+questions\s*[:\-]?\s*(\d+)/i);
+  if (totalQuestions) return parseInt(totalQuestions[1], 10);
 
-  const marks = fullText.match(/maximum\s+marks\s*[:\-]?\s*(\d+)/i);
-  if (paperType === "MCQ" && marks) return parseInt(marks[1], 10);
+  const maxMarks = fullText.match(/maximum\s+marks\s*[:\-]?\s*(\d+)/i);
+  if (maxMarks) return parseInt(maxMarks[1], 10);
 
-  // Fallback: find highest question number in text
+  const totalMark = fullText.match(/total\s+mark\s+for\s+this\s+paper\s+is\s+(\d+)/i);
+  if (totalMark) return parseInt(totalMark[1], 10);
+
   const nums = [];
   const regex = /(?:^|\s)(\d{1,3})[\.)]?\s+(?=[A-Z])/g;
   let match;
+
   while ((match = regex.exec(fullText)) !== null) {
     const n = parseInt(match[1], 10);
     if (n > 0 && n < 200) nums.push(n);
   }
+
   return nums.length ? Math.max(...nums) : null;
 }
-
 // ================= MCQ EXTRACTION =================
 function cleanQuestionText(text, qNum) {
   return text
@@ -169,54 +187,37 @@ function cleanQuestionText(text, qNum) {
 }
 
 function extractMcqQuestionsFromText(pages, expectedCount) {
-  const fullText = pages
-    .map((p) => `\n<<<PAGE:${p.pageNum}>>>\n${p.text}`)
-    .join("\n");
-
   const questions = [];
   if (!expectedCount) return questions;
 
+  const fullText = pages
+    .map(p => `\n<<<PAGE:${p.pageNum}>>>\n${p.text}`)
+    .join("\n");
+
   const starts = [];
-  let cursor = 0;
 
   for (let n = 1; n <= expectedCount; n++) {
-    const regex = new RegExp(
-      `(?:^|\\n)\\s*${n}[\\.)]?\\s+`,
-      "g"
-    );
+    const regex = new RegExp(`(?:^|\\n)\\s*${n}[\\.)]?\\s+`, "m");
+    const match = fullText.match(regex);
 
-    regex.lastIndex = cursor;
+    if (match) {
+      const before = fullText.slice(0, match.index);
+      const pageMatches = [...before.matchAll(/<<<PAGE:(\\d+)>>>/g)];
+      const pageNum = pageMatches.length
+        ? parseInt(pageMatches[pageMatches.length - 1][1], 10)
+        : null;
 
-    let match = regex.exec(fullText);
-
-    if (!match) {
-      console.log(`Question ${n} not found`);
-      continue;
+      starts.push({ q: n, start: match.index, pageNum });
     }
-
-    const before = fullText.slice(0, match.index);
-    const pageMatches = [...before.matchAll(/<<<PAGE:(\d+)>>>/g)];
-    const pageNum = pageMatches.length
-      ? parseInt(pageMatches[pageMatches.length - 1][1], 10)
-      : null;
-
-    starts.push({
-      q: n,
-      start: match.index,
-      pageNum,
-    });
-
-    cursor = match.index + match[0].length;
   }
+
+  starts.sort((a, b) => a.q - b.q);
 
   for (let i = 0; i < starts.length; i++) {
     const current = starts[i];
     const next = starts[i + 1];
 
-    const raw = fullText.slice(
-      current.start,
-      next ? next.start : fullText.length
-    );
+    const raw = fullText.slice(current.start, next ? next.start : fullText.length);
 
     const text = raw
       .replace(/<<<PAGE:\d+>>>/g, " ")
@@ -225,7 +226,6 @@ function extractMcqQuestionsFromText(pages, expectedCount) {
       .replace(/© Cambridge University Press & Assessment \d{4}/gi, " ")
       .replace(/\b0625\/\d+\/[A-Z]\/[A-Z]\/\d+\b/gi, " ")
       .replace(/\[Turn over\]/gi, " ")
-      .replace(/Permission to reproduce[\s\S]*?Cambridge International Education/gi, " ")
       .replace(/\s+/g, " ")
       .trim();
 
