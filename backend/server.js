@@ -82,103 +82,77 @@ function wordToNumber(word) {
 function detectExpectedQuestionCount(pages, paperType) {
   const fullText = pages.map((p) => p.text).join(" ");
 
+  // "there are forty questions" / "there are 40 questions"
   const explicit = fullText.match(/there\s+are\s+([a-z]+|\d+)\s+questions/i);
   if (explicit) {
     const val = explicit[1].toLowerCase();
     return /^\d+$/.test(val) ? parseInt(val, 10) : wordToNumber(val);
   }
 
+  // "Total number of questions: 40"
   const totalMatch = fullText.match(/total\s+number\s+of\s+questions\s*[:\-]?\s*(\d+)/i);
   if (totalMatch) return parseInt(totalMatch[1], 10);
 
-  const marks = fullText.match(/maximum\s+marks\s*[:\-]?\s*(\d+)/i);
-  if (paperType === "MCQ" && marks) return parseInt(marks[1], 10);
+  // "Maximum Marks: 40" — ONLY for MCQ where each question = 1 mark
+  // Use a precise regex that captures the full number including tens
+  if (paperType === "MCQ") {
+    const marks = fullText.match(/maximum\s+marks\s*[:\-]?\s*(\d+)/i);
+    if (marks) return parseInt(marks[1], 10);
+  }
 
   return null;
-}
-
-// ================= CLEAN TEXT FOR MCQ EXTRACTION =================
-// Remove noise that causes false question number matches
-function cleanTextForExtraction(text) {
-  return text
-    // Remove page headers/footers like "Page 1 of 8", "Page 2 of 8"
-    .replace(/Page\s+\d+\s+of\s+\d+/gi, " ")
-    // Remove Cambridge paper codes like "0625/22/F/M/26"
-    .replace(/\b\d{4}\/\d+\/[A-Z]\/[A-Z]\/\d+\b/gi, " ")
-    // Remove copyright lines
-    .replace(/©\s*Cambridge[^.]+\./gi, " ")
-    // Remove "Turn over"
-    .replace(/\[Turn over\]/gi, " ")
-    // Remove standalone page numbers like " 2 " or " 3 " surrounded by spaces
-    // (but only when they are isolated — not part of a measurement like "2.0 N")
-    .replace(/(?<!\d)\s+(\d{1,2})\s+(?!\d|\.)/g, (match, num) => {
-      const n = parseInt(num, 10);
-      // Keep if it looks like it could be a question number (1–100)
-      // Remove if it's just a standalone page number
-      return n > 0 && n <= 100 ? match : " ";
-    })
-    // Remove year references like "202 5" or "2025"
-    .replace(/\b20\d\d\b/g, " ")
-    // Collapse whitespace
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 // ================= MCQ EXTRACTION =================
 function cleanQuestionText(text, qNum) {
   return text
-    .replace(new RegExp(`^\\s*${qNum}[\\.)]?\\s+`), "")
+    .replace(new RegExp(`^\\s*${qNum}[\\.):]?\\s+`), "")
     .replace(/<<<PAGE:\d+>>>/g, " ")
     .replace(/Page\s+\d+\s+of\s+\d+/gi, " ")
-    .replace(/©[^.]+\./gi, " ")
-    .replace(/\b\d{4}\/\d+\/[A-Z]\/[A-Z]\/\d+\b/gi, " ")
-    .replace(/\[Turn over\]/gi, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 120);
 }
 
 function extractMcqQuestionsFromText(pages, expectedCount) {
-  // Build full text with page markers
-  const rawText = pages
-    .map((p) => ` <<<PAGE:${p.pageNum}>>> ${p.text}`)
-    .join(" ");
+  if (!expectedCount) return [];
 
-  // Clean the text to remove noise BEFORE running regex
-  // But keep page markers intact
-  const fullText = rawText
-    .replace(/Page\s+\d+\s+of\s+\d+/gi, " ")
-    .replace(/\b\d{4}\/\d+\/[A-Z]\/[A-Z]\/\d+\b/gi, " ")
-    .replace(/©\s*Cambridge[^.]+\./gi, " ")
-    .replace(/\[Turn over\]/gi, " ")
-    .replace(/\b20\d\d\b/g, " ")
+  // Build full text with page markers — DO NOT aggressively clean
+  // as that can break question detection
+  const fullText = pages
+    .map((p) => ` <<<PAGE:${p.pageNum}>>> ${p.text}`)
+    .join(" ")
     .replace(/\s+/g, " ")
     .trim();
-
-  if (!expectedCount) return [];
 
   const starts = [];
   let searchFrom = 0;
 
   for (let n = 1; n <= expectedCount; n++) {
-    // Strategy: find "n. " or "n) " or "n " followed by a capital letter
-    // BUT require that the number is preceded by a space (not part of "1.0" or "20")
-    // AND that after the number+punctuation there's a capital letter starting a word
-    // We use a specific approach: look for the pattern as a standalone question marker
-
     let found = false;
 
-    // Try multiple patterns in order of specificity
-    const patterns = [
-      // Pattern 1: "n. Capital" — most common in Cambridge papers
-      new RegExp(`(?<=\\s|^)${n}\\. +(?=[A-Z][a-z])`, "g"),
-      // Pattern 2: "n) Capital"
-      new RegExp(`(?<=\\s|^)${n}\\) +(?=[A-Z][a-z])`, "g"),
-      // Pattern 3: "n Capital" — plain number then capital (used in school papers)
-      new RegExp(`(?<=\\s|^)${n} {1,3}(?=[A-Z][a-z])`, "g"),
-    ];
+    // We try patterns from most specific to least specific.
+    // Key insight: a real question number is:
+    //   - preceded by whitespace or start of string
+    //   - followed by . or ) or just space
+    //   - then followed by a word (capital or lowercase start — school papers vary)
+    //   - NOT preceded by another digit (so "10" won't match when looking for "1")
+    //   - NOT part of a decimal like "1.0" or "2.5"
 
-    for (const pattern of patterns) {
+    // Build patterns
+    const escapedN = String(n);
+
+    // Pattern A: "n. Word" — number dot space word (Cambridge style)
+    // Pattern B: "n) Word" — number paren space word
+    // Pattern C: "n Word"  — number space word (school paper style like "4 Which")
+    // For all: ensure char before n is NOT a digit (avoids "10" matching "1")
+    //          ensure char after n+punct is NOT a digit (avoids decimals)
+
+    const patternA = new RegExp(`(?<![\\d])${escapedN}\\.\\s+(?=[A-Za-z])`, "g");
+    const patternB = new RegExp(`(?<![\\d])${escapedN}\\)\\s+(?=[A-Za-z])`, "g");
+    const patternC = new RegExp(`(?<![\\d])${escapedN}\\s{1,3}(?=[A-Z][a-zA-Z])`, "g");
+
+    for (const pattern of [patternA, patternB, patternC]) {
       if (found) break;
       pattern.lastIndex = searchFrom;
 
@@ -186,31 +160,29 @@ function extractMcqQuestionsFromText(pages, expectedCount) {
       while ((match = pattern.exec(fullText)) !== null) {
         if (match.index < searchFrom) continue;
 
-        // Extra guard: make sure this isn't inside a decimal like "1.0" or "2.5"
-        // Check char immediately after the digits
-        const charAfterNum = fullText.charAt(match.index + String(n).length);
-        if (charAfterNum === "." || charAfterNum === ",") {
-          // Could be a decimal — check if next char is a digit
-          const charAfterDot = fullText.charAt(match.index + String(n).length + 1);
-          if (/\d/.test(charAfterDot)) continue; // skip — it's a decimal
+        // Guard: skip if this is a decimal number like "1.0" "2.5"
+        // Check what comes right after the number
+        const posAfterNum = match.index + escapedN.length;
+        const charAfterNum = fullText[posAfterNum];
+        if (charAfterNum === ".") {
+          const charAfterDot = fullText[posAfterNum + 1];
+          if (charAfterDot && /\d/.test(charAfterDot)) continue; // e.g. "1.0" — skip
         }
 
-        // Make sure there's enough gap from previous question
-        // (prevents matching "10" inside text when looking for "1")
-        if (n > 1 && starts.length > 0) {
-          const prevStart = starts[starts.length - 1].start;
-          if (match.index - prevStart < 20) continue; // too close to previous
-        }
+        // Guard: skip if too close to previous question start (< 30 chars gap)
+        if (starts.length > 0 && match.index - starts[starts.length - 1].start < 30) continue;
 
-        const start = match.index;
-        const beforeText = fullText.slice(0, start);
+        // Guard: skip page marker matches
+        if (fullText.slice(Math.max(0, match.index - 10), match.index).includes("PAGE:")) continue;
+
+        const beforeText = fullText.slice(0, match.index);
         const pageMatches = [...beforeText.matchAll(/<<<PAGE:(\d+)>>>/g)];
         const lastPage = pageMatches.length
           ? parseInt(pageMatches[pageMatches.length - 1][1], 10)
           : null;
 
-        starts.push({ q: n, start, pageNum: lastPage });
-        searchFrom = start + String(n).length + 1;
+        starts.push({ q: n, start: match.index, pageNum: lastPage });
+        searchFrom = match.index + escapedN.length + 1;
         found = true;
         break;
       }
@@ -229,7 +201,7 @@ function extractMcqQuestionsFromText(pages, expectedCount) {
     const next = starts[i + 1];
     const raw = fullText.slice(current.start, next ? next.start : fullText.length);
     const text = cleanQuestionText(raw, current.q);
-    if (text && text.length > 5) {
+    if (text && text.length > 3) {
       questions.push({
         q: current.q,
         text,
@@ -246,7 +218,7 @@ function extractMcqQuestionsFromText(pages, expectedCount) {
 }
 
 // ================= CHUNKING =================
-function buildChunks(questionPages, totalPages, paperType) {
+function buildChunks(questionPages, paperType) {
   const maxChars = paperType === "MCQ" ? 1400 : 1200;
   const chunks = [];
   let current = [];
@@ -275,7 +247,6 @@ const upload = multer({
   },
 });
 
-// ================= HELPERS =================
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ================= GROQ CALL =================
@@ -307,7 +278,7 @@ async function callGroq(groq, prompt, retries = 3) {
   return [];
 }
 
-// ================= AI TOPIC MAPPING FOR MCQ =================
+// ================= AI TOPIC MAPPING =================
 async function mapMcqTopicsWithAI(groq, questions, syllabusText) {
   const mapped = [];
   const batchSize = 6;
@@ -329,8 +300,8 @@ QUESTIONS TO MAP:
 ${batch.map((q) => `Q${q.q}: ${q.text}`).join("\n")}
 
 STRICT RULES:
-- Return the same q values given. Do not create new ones.
-- Only map topic and subtopic. Return valid JSON only.`;
+- Return the same q values given. Do not invent new ones.
+- Only return topic and subtopic. Return valid JSON only.`;
 
     try {
       const result = await callGroq(groq, prompt);
@@ -343,10 +314,8 @@ STRICT RULES:
         const ai = resultMap.get(q.q);
         mapped.push({
           ...q,
-          topic: ai?.topic || "Unmapped",
-          subtopic: ai?.subtopic || "Unmapped",
-          answer: q.answer || "",
-          marks: q.marks || 1,
+          topic: ai?.topic?.trim() || "Unmapped",
+          subtopic: ai?.subtopic?.trim() || "Unmapped",
         });
       });
     } catch (err) {
@@ -393,7 +362,7 @@ app.post(
       const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
       let allQuestions = [];
 
-      if (paperType === "MCQ") {
+      if (paperType === "MCQ" && expectedQuestionCount) {
         const serverExtracted = extractMcqQuestionsFromText(qpPages, expectedQuestionCount);
         console.log("Server extracted MCQs:", serverExtracted.length);
         if (serverExtracted.length > 0) {
@@ -401,17 +370,20 @@ app.post(
         }
       }
 
-      // Fallback: use AI chunking for non-MCQ or if MCQ extraction failed
-      if (paperType !== "MCQ" || allQuestions.length === 0) {
-        const chunks = buildChunks(questionPages, qpPages.length, paperType);
+      // Fallback to AI chunking for non-MCQ or if MCQ extraction got too few questions
+      const threshold = expectedQuestionCount ? expectedQuestionCount * 0.5 : 5;
+      if (allQuestions.length < threshold) {
+        console.log(`MCQ extraction got ${allQuestions.length}, falling back to AI chunking`);
+        allQuestions = [];
+        const chunks = buildChunks(questionPages, paperType);
         for (let i = 0; i < chunks.length; i++) {
           const chunkText = chunks[i].map((p) => `[Page ${p.pageNum}]\n${p.text}`).join("\n\n");
           const prompt = `You are an IGCSE Physics question paper parser.
-Paper type detected: ${paperType}
-Return ONLY this JSON object format:
+Paper type: ${paperType}
+Return ONLY this JSON object:
 {
   "questions": [
-    { "q": 1, "text": "brief question summary under 100 characters", "topic": "IGCSE syllabus chapter", "subtopic": "IGCSE syllabus subtopic", "answer": "", "marks": 1 }
+    { "q": 1, "text": "brief question summary under 100 chars", "topic": "IGCSE syllabus chapter", "subtopic": "IGCSE syllabus subtopic", "answer": "", "marks": 1 }
   ]
 }
 
@@ -421,10 +393,11 @@ ${syllabusText}
 QUESTION PAPER TEXT:
 ${chunkText}
 
-STRICT RULES:
-- Extract every visible main question number.
-- For Theory/Practical papers, group subparts under main question number.
-- topic and subtopic must match syllabus as closely as possible.`;
+RULES:
+- Extract every visible numbered question.
+- For Theory/Practical: use main question number only.
+- Match topic and subtopic to syllabus.
+- Return valid JSON only.`;
 
           const result = await callGroq(groq, prompt);
           if (Array.isArray(result)) allQuestions.push(...result);
@@ -432,7 +405,7 @@ STRICT RULES:
         }
       }
 
-      // Deduplicate and clean
+      // Deduplicate, clean, sort
       const seen = new Set();
       const finalQuestions = allQuestions
         .filter((q) => {
@@ -444,7 +417,7 @@ STRICT RULES:
         })
         .map((q) => ({
           q: parseInt(q.q, 10),
-          text: (q.text || "").slice(0, 120),
+          text: (q.text || "").replace(/\s+/g, " ").trim().slice(0, 120),
           topic: q.topic?.trim() || "Unmapped",
           subtopic: q.subtopic?.trim() || "Unmapped",
           answer: q.answer || "",
@@ -494,12 +467,12 @@ STRICT RULES:
 
       const insights = [
         `Paper type detected: ${paperType}`,
-        `Expected questions detected dynamically: ${expectedQuestionCount || "Unknown"}`,
-        `Actual extracted questions: ${finalQuestions.length}`,
+        `Expected questions: ${expectedQuestionCount || "Unknown"}`,
+        `Extracted questions: ${finalQuestions.length}`,
         `Missing question numbers: ${missingNums.length ? missingNums.join(", ") : "None"}`,
-        `Paper processed from ${qpPages.length} pages, ${questionPages.length} question pages identified.`,
-        `Heaviest chapter: "${top.chapter}" with ${top.count} questions (${top.pct}% of paper).`,
-        `Total of ${finalQuestions.length} questions mapped across ${chapterSummary.length} topic chapters.`,
+        `Processed ${qpPages.length} pages, ${questionPages.length} question-bearing pages identified.`,
+        `Heaviest chapter: "${top.chapter}" with ${top.count} questions (${top.pct}%).`,
+        `${finalQuestions.length} questions mapped across ${chapterSummary.length} topic chapters.`,
       ];
 
       return res.json({
@@ -528,7 +501,6 @@ app.get(/.*/, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// ================= START SERVER =================
 app.listen(PORT, () => {
   console.log(`PhysicsAnalyser running on http://localhost:${PORT}`);
 });
