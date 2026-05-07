@@ -82,27 +82,36 @@ function wordToNumber(word) {
 function detectExpectedQuestionCount(pages, paperType) {
   const fullText = pages.map((p) => p.text).join(" ");
 
-  // "there are forty questions" / "there are 40 questions"
+  const wordNums = {
+    one: 1, two: 2, three: 3, four: 4, five: 5,
+    six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+    eleven: 11, twelve: 12, thirteen: 13, fourteen: 14,
+    fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18,
+    nineteen: 19, twenty: 20, thirty: 30, forty: 40,
+    fifty: 50, sixty: 60
+  };
+
   const explicit = fullText.match(/there\s+are\s+([a-z]+|\d+)\s+questions/i);
   if (explicit) {
     const val = explicit[1].toLowerCase();
-    return /^\d+$/.test(val) ? parseInt(val, 10) : wordToNumber(val);
+    const n = /^\d+$/.test(val) ? parseInt(val, 10) : wordNums[val];
+    if (n && n >= 10) return n;
   }
 
-  // "Total number of questions: 40"
-  const totalMatch = fullText.match(/total\s+number\s+of\s+questions\s*[:\-]?\s*(\d+)/i);
-  if (totalMatch) return parseInt(totalMatch[1], 10);
+  const maxMarks = fullText.match(/maximum\s+marks\s*[:\-]?\s*(\d+)/i);
+  if (paperType === "MCQ" && maxMarks) {
+    const n = parseInt(maxMarks[1], 10);
+    if (n >= 10) return n;
+  }
 
-  // "Maximum Marks: 40" — ONLY for MCQ where each question = 1 mark
-  // Use a precise regex that captures the full number including tens
-  if (paperType === "MCQ") {
-    const marks = fullText.match(/maximum\s+marks\s*[:\-]?\s*(\d+)/i);
-    if (marks) return parseInt(marks[1], 10);
+  const totalMark = fullText.match(/total\s+mark\s+for\s+this\s+paper\s+is\s+(\d+)/i);
+  if (paperType === "MCQ" && totalMark) {
+    const n = parseInt(totalMark[1], 10);
+    if (n >= 10) return n;
   }
 
   return null;
 }
-
 // ================= MCQ EXTRACTION =================
 function cleanQuestionText(text, qNum) {
   return text
@@ -115,96 +124,98 @@ function cleanQuestionText(text, qNum) {
 }
 
 function extractMcqQuestionsFromText(pages, expectedCount) {
-  if (!expectedCount) return [];
-
-  // Build full text with page markers — DO NOT aggressively clean
-  // as that can break question detection
   const fullText = pages
     .map((p) => ` <<<PAGE:${p.pageNum}>>> ${p.text}`)
     .join(" ")
     .replace(/\s+/g, " ")
     .trim();
 
-  const starts = [];
-  let searchFrom = 0;
+  const questions = [];
 
-  for (let n = 1; n <= expectedCount; n++) {
-    let found = false;
+  const starter =
+    "(A|An|The|Which|What|Why|How|Identify|Calculate|State|Explain|Describe|Both|Equal|One|Two|Three|Uranium|Intruder)";
 
-    // We try patterns from most specific to least specific.
-    // Key insight: a real question number is:
-    //   - preceded by whitespace or start of string
-    //   - followed by . or ) or just space
-    //   - then followed by a word (capital or lowercase start — school papers vary)
-    //   - NOT preceded by another digit (so "10" won't match when looking for "1")
-    //   - NOT part of a decimal like "1.0" or "2.5"
+  const candidateRegex = new RegExp(
+    `(?:^|\\s)(\\d{1,3})[\\.)]?\\s+(?=${starter}\\b)`,
+    "gi"
+  );
 
-    // Build patterns
-    const escapedN = String(n);
+  const candidates = [];
+  let match;
 
-    // Pattern A: "n. Word" — number dot space word (Cambridge style)
-    // Pattern B: "n) Word" — number paren space word
-    // Pattern C: "n Word"  — number space word (school paper style like "4 Which")
-    // For all: ensure char before n is NOT a digit (avoids "10" matching "1")
-    //          ensure char after n+punct is NOT a digit (avoids decimals)
+  while ((match = candidateRegex.exec(fullText)) !== null) {
+    const qNum = parseInt(match[1], 10);
 
-    const patternA = new RegExp(`(?<![\\d])${escapedN}\\.\\s+(?=[A-Za-z])`, "g");
-    const patternB = new RegExp(`(?<![\\d])${escapedN}\\)\\s+(?=[A-Za-z])`, "g");
-    const patternC = new RegExp(`(?<![\\d])${escapedN}\\s{1,3}(?=[A-Z][a-zA-Z])`, "g");
+    if (qNum >= 1 && qNum <= 200) {
+      const digitIndex = match[0].search(/\d/);
+      const start = match.index + digitIndex;
 
-    for (const pattern of [patternA, patternB, patternC]) {
-      if (found) break;
-      pattern.lastIndex = searchFrom;
-
-      let match;
-      while ((match = pattern.exec(fullText)) !== null) {
-        if (match.index < searchFrom) continue;
-
-        // Guard: skip if this is a decimal number like "1.0" "2.5"
-        // Check what comes right after the number
-        const posAfterNum = match.index + escapedN.length;
-        const charAfterNum = fullText[posAfterNum];
-        if (charAfterNum === ".") {
-          const charAfterDot = fullText[posAfterNum + 1];
-          if (charAfterDot && /\d/.test(charAfterDot)) continue; // e.g. "1.0" — skip
-        }
-
-        // Guard: skip if too close to previous question start (< 30 chars gap)
-        if (starts.length > 0 && match.index - starts[starts.length - 1].start < 30) continue;
-
-        // Guard: skip page marker matches
-        if (fullText.slice(Math.max(0, match.index - 10), match.index).includes("PAGE:")) continue;
-
-        const beforeText = fullText.slice(0, match.index);
-        const pageMatches = [...beforeText.matchAll(/<<<PAGE:(\d+)>>>/g)];
-        const lastPage = pageMatches.length
-          ? parseInt(pageMatches[pageMatches.length - 1][1], 10)
-          : null;
-
-        starts.push({ q: n, start: match.index, pageNum: lastPage });
-        searchFrom = match.index + escapedN.length + 1;
-        found = true;
-        break;
-      }
-    }
-
-    if (!found) {
-      console.log(`Warning: Could not find question ${n} in text`);
+      candidates.push({
+        q: qNum,
+        start,
+      });
     }
   }
 
-  console.log(`Found starts for ${starts.length} questions out of ${expectedCount} expected`);
+  if (candidates.length === 0) return questions;
 
-  const questions = [];
+  candidates.sort((a, b) => a.start - b.start);
+
+  const highestDetected = Math.max(...candidates.map((c) => c.q));
+  const effectiveCount =
+    expectedCount && expectedCount >= 10
+      ? expectedCount
+      : highestDetected;
+
+  const starts = [];
+  let lastStart = -1;
+
+  for (let n = 1; n <= effectiveCount; n++) {
+    const found = candidates.find(
+      (c) => c.q === n && c.start > lastStart
+    );
+
+    if (found) {
+      const before = fullText.slice(0, found.start);
+      const pageMatches = [...before.matchAll(/<<<PAGE:(\d+)>>>/g)];
+      const pageNum = pageMatches.length
+        ? parseInt(pageMatches[pageMatches.length - 1][1], 10)
+        : null;
+
+      starts.push({
+        q: n,
+        start: found.start,
+        pageNum,
+      });
+
+      lastStart = found.start;
+    }
+  }
+
   for (let i = 0; i < starts.length; i++) {
     const current = starts[i];
     const next = starts[i + 1];
-    const raw = fullText.slice(current.start, next ? next.start : fullText.length);
-    const text = cleanQuestionText(raw, current.q);
-    if (text && text.length > 3) {
+
+    const raw = fullText.slice(
+      current.start,
+      next ? next.start : fullText.length
+    );
+
+    const text = raw
+      .replace(/<<<PAGE:\d+>>>/g, " ")
+      .replace(new RegExp(`^\\s*${current.q}[\\.)]?\\s+`), "")
+      .replace(/Page\s+\d+\s+of\s+\d+/gi, " ")
+      .replace(/© Cambridge University Press & Assessment \d{4}/gi, " ")
+      .replace(/\b0625\/\d+\/[A-Z]\/[A-Z]\/\d+\b/gi, " ")
+      .replace(/\[Turn over\]/gi, " ")
+      .replace(/Permission to reproduce[\s\S]*?Cambridge International Education/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (text) {
       questions.push({
         q: current.q,
-        text,
+        text: text.slice(0, 220),
         topic: "Unmapped",
         subtopic: "Unmapped",
         answer: "",
