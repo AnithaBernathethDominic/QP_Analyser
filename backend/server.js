@@ -133,7 +133,7 @@ function extractMcqQuestionsFromText(pages, expectedCount) {
   const questions = [];
 
   const starter =
-    "(A|An|The|Which|What|Why|How|Identify|Calculate|State|Explain|Describe|Both|Equal|One|Two|Three|Uranium|Intruder)";
+  "(A|An|The|Which|What|Why|How|Identify|Calculate|State|Explain|Describe|Both|Equal|One|Two|Three|Four|Graph|Uranium|Intruder|A\\s+satellite|One\\s+nuclear)";
 
   const candidateRegex = new RegExp(
     `(?:^|\\s)(\\d{1,3})[\\.)]?\\s+(?=${starter}\\b)`,
@@ -156,7 +156,33 @@ function extractMcqQuestionsFromText(pages, expectedCount) {
       });
     }
   }
+// Fallback: catch missed numbered questions like "31 Graph 1 shows..."
+for (let n = 1; n <= (expectedCount || 60); n++) {
+  const already = candidates.some((c) => c.q === n);
+  if (already) continue;
 
+  const looseRegex = new RegExp(`(?:^|\\s)${n}[\\.)]?\\s+`, "g");
+  let looseMatch;
+
+  while ((looseMatch = looseRegex.exec(fullText)) !== null) {
+    const after = fullText.slice(looseRegex.lastIndex, looseRegex.lastIndex + 80);
+
+    if (
+      after.trim().length > 10 &&
+      !/^[\\d\\.\\-\\/\\s]+$/.test(after.slice(0, 20)) &&
+      !after.toLowerCase().startsWith("page") &&
+      !after.toLowerCase().startsWith("cambridge") &&
+      !after.toLowerCase().startsWith("copyright")
+    ) {
+      const digitIndex = looseMatch[0].search(/\d/);
+      candidates.push({
+        q: n,
+        start: looseMatch.index + digitIndex,
+      });
+      break;
+    }
+  }
+}
   if (candidates.length === 0) return questions;
 
   candidates.sort((a, b) => a.start - b.start);
