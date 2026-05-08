@@ -1,5 +1,6 @@
 require("dotenv").config();
 
+const { createCanvas } = require("canvas");
 const express = require("express");
 const multer = require("multer");
 const cors = require("cors");
@@ -30,6 +31,33 @@ async function extractPdfPages(buffer) {
   return pages;
 }
 
+// ================= RENDER IMAGES =================
+async function renderPdfPageImages(buffer, pageNums) {
+  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+
+  const pdf = await pdfjsLib.getDocument({
+    data: new Uint8Array(buffer),
+  }).promise;
+
+  const pageImages = {};
+
+  for (const pageNum of pageNums) {
+    const page = await pdf.getPage(pageNum);
+    const viewport = page.getViewport({ scale: 1.1 });
+
+    const canvas = createCanvas(viewport.width, viewport.height);
+    const context = canvas.getContext("2d");
+
+    await page.render({
+      canvasContext: context,
+      viewport,
+    }).promise;
+
+    pageImages[pageNum] = canvas.toDataURL("image/png");
+  }
+
+  return pageImages;
+}
 // ================= PAPER TYPE =================
 function detectPaperType(pages) {
   const text = pages.slice(0, 3).map((p) => p.text).join(" ").toLowerCase();
@@ -241,7 +269,7 @@ for (let n = 1; n <= (expectedCount || 60); n++) {
     if (text) {
       questions.push({
         q: current.q,
-        text: text.slice(0, 220),
+        text,
         topic: "Unmapped",
         subtopic: "Unmapped",
         answer: "",
@@ -511,7 +539,16 @@ RULES:
         `Heaviest chapter: "${top.chapter}" with ${top.count} questions (${top.pct}%).`,
         `${finalQuestions.length} questions mapped across ${chapterSummary.length} topic chapters.`,
       ];
+       //added for the images
+      const usedPageNums = [
+        ...new Set(finalQuestions.map((q) => q.pageNum).filter(Boolean)),
+        ];
 
+      const pageImages = await renderPdfPageImages(
+                req.files.questionPaper[0].buffer,
+                usedPageNums
+          );
+      // end images
       return res.json({
         success: true,
         data: {
@@ -522,6 +559,7 @@ RULES:
           insights,
           paperTitle: "Physics Question Paper",
           paperInfo: `IGCSE ${paperType}`,
+          pageImages,
         },
       });
 
