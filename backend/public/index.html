@@ -364,6 +364,24 @@ async function startAnalysis() {
 // ── Render Results ────────────────────────────────────────────────────────────
 function renderResults() {
   const d = analysisData;
+
+let pdfObjectUrl = "";
+
+if (d.questionPaperBase64) {
+  const byteCharacters = atob(d.questionPaperBase64);
+  const byteNumbers = new Array(byteCharacters.length);
+
+  for (let i = 0; i < byteCharacters.length; i++) {
+    byteNumbers[i] = byteCharacters.charCodeAt(i);
+  }
+
+  const byteArray = new Uint8Array(byteNumbers);
+  const blob = new Blob([byteArray], { type: "application/pdf" });
+  pdfObjectUrl = URL.createObjectURL(blob);
+}
+
+
+ 
   show("resultScreen");
   document.getElementById("headerActions").style.display = "flex";
 
@@ -389,24 +407,24 @@ document.getElementById("questionsTbody").innerHTML = d.questions.map((q, i) => 
   const ci = d.chapterSummary.findIndex(c => c.chapter === q.topic);
   const color = TOPIC_COLORS[(ci < 0 ? i : ci) % TOPIC_COLORS.length];
 
-  const imageHtml =
-    q.pageNum && d.pageImages && d.pageImages[q.pageNum]
-      ? `
-        <div style="margin-top:14px">
-          <img 
-            src="${d.pageImages[q.pageNum]}" 
-            style="
-              width:100%;
-              max-width:650px;
-              border-radius:10px;
-              border:1px solid #334155;
-              background:#fff;
-              padding:6px;
-            "
-          />
-        </div>
-      `
-      : "";
+ const imageHtml =
+  q.pageNum && pdfObjectUrl
+    ? `
+      <div style="margin-top:14px">
+        <iframe
+          src="${pdfObjectUrl}#page=${q.pageNum}&toolbar=0&navpanes=0"
+          style="
+            width:100%;
+            max-width:650px;
+            height:520px;
+            border-radius:10px;
+            border:1px solid #334155;
+            background:white;
+          ">
+        </iframe>
+      </div>
+    `
+    : "";
 
   return `
     <tr>
