@@ -384,18 +384,78 @@ function renderResults() {
     </div>`).join("");
 
   // Questions table
-  document.getElementById("questionsTbody").innerHTML = d.questions.map((q, i) => {
-    const ci = d.chapterSummary.findIndex(c => c.chapter === q.topic);
-    const color = TOPIC_COLORS[(ci < 0 ? i : ci) % TOPIC_COLORS.length];
-    return `<tr>
-      <td style="color:var(--accent);font-weight:700;white-space:nowrap">${q.q}</td>
-      <td style="max-width:340px">${escHtml(q.text)}</td>
-      <td><span class="tag" style="background:${color}22;color:${color};border:1px solid ${color}44">${escHtml(q.topic)}</span></td>
-      <td style="color:var(--muted);font-size:12px;max-width:260px">${escHtml(q.subtopic)}</td>
-      <td><span class="tag tag-ans">${q.answer || "—"}</span></td>
-    </tr>`;
-  }).join("");
+  // Questions table
+document.getElementById("questionsTbody").innerHTML = d.questions.map((q, i) => {
+  const ci = d.chapterSummary.findIndex(c => c.chapter === q.topic);
+  const color = TOPIC_COLORS[(ci < 0 ? i : ci) % TOPIC_COLORS.length];
 
+  const imageHtml =
+    q.pageNum && d.pageImages && d.pageImages[q.pageNum]
+      ? `
+        <div style="margin-top:14px">
+          <img 
+            src="${d.pageImages[q.pageNum]}" 
+            style="
+              width:100%;
+              max-width:650px;
+              border-radius:10px;
+              border:1px solid #334155;
+              background:#fff;
+              padding:6px;
+            "
+          />
+        </div>
+      `
+      : "";
+
+  return `
+    <tr>
+      <td style="color:var(--accent);font-weight:700;white-space:nowrap">
+        ${q.q}
+      </td>
+
+      <td style="max-width:700px">
+
+        <div style="
+          font-size:15px;
+          line-height:1.8;
+          white-space:pre-wrap;
+          color:#f1f5f9;
+        ">
+          ${escHtml(q.text)}
+        </div>
+
+        ${imageHtml}
+
+      </td>
+
+      <td>
+        <span class="tag"
+          style="
+            background:${color}22;
+            color:${color};
+            border:1px solid ${color}44
+          ">
+          ${escHtml(q.topic)}
+        </span>
+      </td>
+
+      <td style="
+        color:var(--muted);
+        font-size:12px;
+        max-width:260px
+      ">
+        ${escHtml(q.subtopic)}
+      </td>
+
+      <td>
+        <span class="tag tag-ans">
+          ${q.answer || "—"}
+        </span>
+      </td>
+    </tr>
+  `;
+}).join("");
   // Chart bars
   const sorted = [...d.chapterSummary].sort((a,b) => b.count - a.count);
   document.getElementById("chartWrap").innerHTML = `
