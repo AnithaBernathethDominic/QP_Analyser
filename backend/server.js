@@ -1,6 +1,6 @@
 require("dotenv").config();
 
-const canvasPkg = require("canvas");
+//const canvasPkg = require("canvas");
 const { createCanvas, Image, ImageData } = canvasPkg;
 
 global.Image = Image;
@@ -57,7 +57,7 @@ class NodeCanvasFactory {
   }
 }
 
-async function renderPdfPageImages(buffer, pageNums) {
+/*   async function renderPdfPageImages(buffer, pageNums) {
   const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
 
   const pdf = await pdfjsLib.getDocument({
@@ -95,7 +95,8 @@ async function renderPdfPageImages(buffer, pageNums) {
   }
 
   return pageImages;
-}
+} *****/
+
 // ================= PAPER TYPE =================
 function detectPaperType(pages) {
   const text = pages.slice(0, 3).map((p) => p.text).join(" ").toLowerCase();
@@ -601,10 +602,11 @@ RULES:
             ...new Set(finalQuestionsWithPages.map((q) => q.pageNum).filter(Boolean)),
         ];
 
-      const pageImages = await renderPdfPageImages(
+    /*  const pageImages = await renderPdfPageImages(
                 req.files.questionPaper[0].buffer,
                 usedPageNums
-          );
+          ); */
+      const questionPaperBase64 = req.files.questionPaper[0].buffer.toString("base64");
       // end images
       return res.json({
         success: true,
@@ -614,9 +616,9 @@ RULES:
           questions: finalQuestionsWithPages,
           chapterSummary,
           insights,
+          questionPaperBase64,
           paperTitle: "Physics Question Paper",
           paperInfo: `IGCSE ${paperType}`,
-          pageImages,
         },
       });
 
