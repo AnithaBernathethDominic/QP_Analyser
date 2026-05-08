@@ -1,6 +1,11 @@
 require("dotenv").config();
 
-const { createCanvas } = require("canvas");
+const canvasPkg = require("canvas");
+const { createCanvas, Image, ImageData } = canvasPkg;
+
+global.Image = Image;
+global.ImageData = ImageData;
+
 const express = require("express");
 const multer = require("multer");
 const cors = require("cors");
@@ -32,28 +37,61 @@ async function extractPdfPages(buffer) {
 }
 
 // ================= RENDER IMAGES =================
+class NodeCanvasFactory {
+  create(width, height) {
+    const canvas = createCanvas(width, height);
+    const context = canvas.getContext("2d");
+    return { canvas, context };
+  }
+
+  reset(canvasAndContext, width, height) {
+    canvasAndContext.canvas.width = width;
+    canvasAndContext.canvas.height = height;
+  }
+
+  destroy(canvasAndContext) {
+    canvasAndContext.canvas.width = 0;
+    canvasAndContext.canvas.height = 0;
+    canvasAndContext.canvas = null;
+    canvasAndContext.context = null;
+  }
+}
+
 async function renderPdfPageImages(buffer, pageNums) {
   const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
 
   const pdf = await pdfjsLib.getDocument({
     data: new Uint8Array(buffer),
+    disableFontFace: true,
+    useSystemFonts: true,
   }).promise;
 
   const pageImages = {};
+  const canvasFactory = new NodeCanvasFactory();
 
   for (const pageNum of pageNums) {
-    const page = await pdf.getPage(pageNum);
-    const viewport = page.getViewport({ scale: 1.1 });
+    try {
+      const page = await pdf.getPage(pageNum);
+      const viewport = page.getViewport({ scale: 1.15 });
 
-    const canvas = createCanvas(viewport.width, viewport.height);
-    const context = canvas.getContext("2d");
+      const canvasAndContext = canvasFactory.create(
+        viewport.width,
+        viewport.height
+      );
 
-    await page.render({
-      canvasContext: context,
-      viewport,
-    }).promise;
+      await page.render({
+        canvasContext: canvasAndContext.context,
+        viewport,
+        canvasFactory,
+      }).promise;
 
-    pageImages[pageNum] = canvas.toDataURL("image/png");
+      pageImages[pageNum] =
+        canvasAndContext.canvas.toDataURL("image/png");
+
+      canvasFactory.destroy(canvasAndContext);
+    } catch (err) {
+      console.error(`Failed to render page ${pageNum}:`, err.message);
+    }
   }
 
   return pageImages;
