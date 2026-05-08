@@ -281,7 +281,24 @@ for (let n = 1; n <= (expectedCount || 60); n++) {
 
   return questions;
 }
+//function added for image rendering
+function assignPageNumsToQuestions(finalQuestions, qpPages) {
+  return finalQuestions.map((q) => {
+    if (q.pageNum) return q;
 
+    const qNum = parseInt(q.q, 10);
+
+    const matchedPage = qpPages.find((p) => {
+      const regex = new RegExp(`(^|\\n|\\s)${qNum}[\\.)]?\\s+`);
+      return regex.test(p.text);
+    });
+
+    return {
+      ...q,
+      pageNum: matchedPage ? matchedPage.pageNum : null,
+    };
+  });
+}
 // ================= CHUNKING =================
 function buildChunks(questionPages, paperType) {
   const maxChars = paperType === "MCQ" ? 1400 : 1200;
@@ -540,8 +557,10 @@ RULES:
         `${finalQuestions.length} questions mapped across ${chapterSummary.length} topic chapters.`,
       ];
        //added for the images
+      const finalQuestionsWithPages = assignPageNumsToQuestions(finalQuestions, qpPages);
+
       const usedPageNums = [
-        ...new Set(finalQuestions.map((q) => q.pageNum).filter(Boolean)),
+            ...new Set(finalQuestionsWithPages.map((q) => q.pageNum).filter(Boolean)),
         ];
 
       const pageImages = await renderPdfPageImages(
@@ -554,7 +573,7 @@ RULES:
         data: {
           totalQuestions: finalQuestions.length,
           totalMarks: finalQuestions.reduce((sum, q) => sum + (Number(q.marks) || 1), 0),
-          questions: finalQuestions,
+          questions: finalQuestionsWithPages,
           chapterSummary,
           insights,
           paperTitle: "Physics Question Paper",
