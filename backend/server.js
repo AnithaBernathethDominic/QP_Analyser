@@ -1,10 +1,10 @@
 require("dotenv").config();
 
 //const canvasPkg = require("canvas");
-const { createCanvas, Image, ImageData } = canvasPkg;
+//const { createCanvas, Image, ImageData } = canvasPkg;
 
-global.Image = Image;
-global.ImageData = ImageData;
+//global.Image = Image;
+//global.ImageData = ImageData;
 
 const express = require("express");
 const multer = require("multer");
