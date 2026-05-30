@@ -452,15 +452,18 @@ for (let n = 1; n <= (expectedCount || 60); n++) {
 
     if (found) {
 
-      const before = fullText.slice(0, found.start);
-
-      const pageMatches = [...before.matchAll(/<<<PAGE:(\d+)>>>/g)];
-
-      const pageNum = pageMatches.length
-
-        ? parseInt(pageMatches[pageMatches.length - 1][1], 10)
-
-        : null;
+      // Find the page this question is on: look for PAGE marker at or just after the question start
+      const afterStart = fullText.slice(found.start, found.start + 200);
+      const afterMatch = afterStart.match(/<<<PAGE:(\d+)>>>/);
+      let pageNum = null;
+      if (afterMatch) {
+        pageNum = parseInt(afterMatch[1], 10);
+      } else {
+        // fallback: last PAGE marker before start
+        const before = fullText.slice(0, found.start);
+        const pageMatches = [...before.matchAll(/<<<PAGE:(\d+)>>>/g)];
+        pageNum = pageMatches.length ? parseInt(pageMatches[pageMatches.length - 1][1], 10) : null;
+      }
 
       starts.push({
 
