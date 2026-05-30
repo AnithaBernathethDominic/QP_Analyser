@@ -411,14 +411,15 @@ function extractMcqQuestionsFromText(pages, expectedCount) {
   const starts = [];
 
   for (let n = 1; n <= effectiveCount; n++) {
-    // Find this question's position in fullText — try multiple patterns in priority order
+    // Find this question's position in fullText — try multiple patterns in priority order.
+    // IMPORTANT: use (?<!\d) before the number to prevent "1." matching inside "21."
     const patterns = [
-      // Pattern 1: "N. " preceded by space/start (most common in question papers)
-      new RegExp(`(?:^|\\s)(${n})\\.\\s+(?=\\S)`, "g"),
-      // Pattern 2: "N) " 
-      new RegExp(`(?:^|\\s)(${n})\\)\\s+(?=\\S)`, "g"),
-      // Pattern 3: bare "N " with enough context after (fallback)
-      new RegExp(`(?:^|\\s)(${n})\\s{1,3}(?=[A-Z])`, "g"),
+      // Pattern 1: "N. " not preceded by another digit (most common in question papers)
+      new RegExp(`(?<![\\d])(${n})\\.[ \\t]+(?=\\S)`, "g"),
+      // Pattern 2: "N) " not preceded by digit
+      new RegExp(`(?<![\\d])(${n})\\)[ \\t]+(?=\\S)`, "g"),
+      // Pattern 3: bare "N " at start of text item, not preceded by digit
+      new RegExp(`(?<![\\d])(${n})[ \\t]{1,3}(?=[A-Z][a-z])`, "g"),
     ];
 
     let bestStart = null;
@@ -818,6 +819,10 @@ app.post(
         const serverExtracted = extractMcqQuestionsFromText(qpPages, expectedQuestionCount);
 
         console.log("Server extracted MCQs:", serverExtracted.length);
+        if (serverExtracted.length > 0) {
+          console.log("Q1 text preview:", (serverExtracted[0]?.text || "").slice(0, 200));
+          console.log("Q1 hasImage:", serverExtracted[0]?.hasImage);
+        }
 
         if (serverExtracted.length > 0) {
 
@@ -827,9 +832,12 @@ app.post(
 
       }
 
-      // Fallback to AI chunking for non-MCQ or if MCQ extraction got too few questions
+      // Fallback to AI chunking ONLY for non-MCQ papers, or if MCQ extraction got zero questions
+      // (Never fall back for MCQ if we got a reasonable number — AI chunking truncates text to 100 chars)
 
-      const threshold = expectedQuestionCount ? expectedQuestionCount * 0.5 : 5;
+      const threshold = paperType === "MCQ"
+        ? 1  // For MCQ: only fall back if we got literally nothing
+        : (expectedQuestionCount ? expectedQuestionCount * 0.5 : 5);
 
       if (allQuestions.length < threshold) {
 
