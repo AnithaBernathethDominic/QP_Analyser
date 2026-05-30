@@ -1,1101 +1,1155 @@
-require("dotenv").config();
+<!DOCTYPE html>
 
-//const canvasPkg = require("canvas");
+<html lang="en">
 
-//const { createCanvas, Image, ImageData } = canvasPkg;
+<head>
 
-//global.Image = Image;
+<meta charset="UTF-8" />
 
-//global.ImageData = ImageData;
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-const express = require("express");
+<title>PhysicsAnalyser — IGCSE Question Paper Mapper</title>
 
-const multer = require("multer");
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
 
-const cors = require("cors");
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
-const path = require("path");
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
-const Groq = require("groq-sdk");
+<style>
 
-const app = express();
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-const PORT = process.env.PORT || 3001;
+  :root {
 
-app.use(cors());
+    --bg:       #0f1117;
 
-app.use(express.json({ limit: "50mb" }));
+    --surface:  #181c27;
 
-// ================= PDF EXTRACT =================
+    --card:     #1e2333;
 
-async function extractPdfPages(buffer) {
+    --border:   #2a3050;
 
-  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    --accent:   #6c8bff;
 
-  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+    --acc-soft: #3d4fa0;
 
-  const pages = [];
+    --green:    #4ecb8d;
 
-  for (let i = 1; i <= pdf.numPages; i++) {
+    --amber:    #f5a623;
 
-    const page = await pdf.getPage(i);
+    --red:      #e05c5c;
 
-    const content = await page.getTextContent();
+    --text:     #e8ecf4;
 
-    const text = content.items
-
-      .map((item) => item.str)
-
-      .join(" ")
-
-      .replace(/\s+/g, " ")
-
-      .trim();
-
-    pages.push({ pageNum: i, text });
+    --muted:    #7b84a0;
 
   }
 
-  return pages;
+  body { font-family: 'IBM Plex Mono', monospace; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* ── header ── */
+
+  .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 32px; display: flex; align-items: center; gap: 14px; position: sticky; top: 0; z-index: 100; }
+
+  .logo-icon { width: 38px; height: 38px; border-radius: 10px; background: var(--accent); display: grid; place-items: center; font-size: 20px; flex-shrink: 0; }
+
+  .logo-title { font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 800; letter-spacing: -0.5px; }
+
+  .logo-sub { font-size: 10px; color: var(--muted); margin-top: 1px; }
+
+  .header-actions { margin-left: auto; display: flex; gap: 10px; }
+
+  /* ── layout ── */
+
+  .main { max-width: 1140px; margin: 0 auto; padding: 36px 24px; }
+
+  /* ── buttons ── */
+
+  .btn { font-family: 'IBM Plex Mono', monospace; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; border: none; padding: 10px 22px; transition: all 0.18s; }
+
+  .btn-accent { background: var(--accent); color: #fff; }
+
+  .btn-accent:hover { background: #7d9aff; }
+
+  .btn-accent:disabled { opacity: 0.38; cursor: not-allowed; }
+
+  .btn-ghost { background: none; color: var(--muted); border: 1px solid var(--border); }
+
+  .btn-ghost:hover { color: var(--text); border-color: var(--muted); }
+
+  .btn-green { background: var(--green); color: #0f1117; }
+
+  .btn-green:hover { background: #5fdda0; }
+
+  /* ── upload screen ── */
+
+  .upload-hero { text-align: center; margin-bottom: 44px; }
+
+  .upload-hero h1 { font-family: 'Syne', sans-serif; font-size: 38px; font-weight: 800; letter-spacing: -1px; }
+
+  .upload-hero p { color: var(--muted); font-size: 14px; margin-top: 10px; max-width: 520px; margin-left: auto; margin-right: auto; line-height: 1.6; }
+
+  .upload-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; max-width: 680px; margin: 0 auto 36px; }
+
+  .dropzone { background: var(--card); border: 2px dashed var(--border); border-radius: 14px; padding: 36px 24px; text-align: center; cursor: pointer; transition: all 0.2s; }
+
+  .dropzone:hover, .dropzone.drag { border-color: var(--accent); background: rgba(108,139,255,0.07); }
+
+  .dropzone.filled { border-color: var(--green); border-style: solid; }
+
+  .dropzone .dz-icon { font-size: 40px; margin-bottom: 12px; }
+
+  .dropzone .dz-label { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+
+  .dropzone .dz-hint { color: var(--muted); font-size: 11px; }
+
+  .dropzone .dz-filename { color: var(--green); font-size: 12px; margin-top: 6px; word-break: break-all; }
+
+  .dropzone .dz-cta { color: var(--accent); font-size: 12px; margin-top: 8px; }
+
+  .upload-center { text-align: center; }
+
+  /* ── progress screen ── */
+
+  .progress-wrap { text-align: center; padding-top: 80px; }
+
+  .progress-bar-track { background: var(--border); border-radius: 99px; height: 10px; overflow: hidden; max-width: 440px; margin: 0 auto; }
+
+  .progress-bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--green)); border-radius: 99px; transition: width 0.3s ease; }
+
+  .progress-steps { margin-top: 32px; display: flex; flex-direction: column; gap: 10px; align-items: center; }
+
+  .step-row { font-size: 12px; transition: color 0.4s; }
+
+  .step-done { color: var(--green); }
+
+  .step-pending { color: var(--muted); }
+
+  /* ── summary cards ── */
+
+  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 30px; }
+
+  .summary-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; }
+
+  .summary-card .sc-icon { font-size: 22px; }
+
+  .summary-card .sc-val { font-family: 'Syne', sans-serif; font-size: 32px; font-weight: 800; margin-top: 6px; }
+
+  .summary-card .sc-lbl { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+  /* ── tabs ── */
+
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 26px; }
+
+  .tab { background: none; border: none; color: var(--muted); border-bottom: 2px solid transparent; padding: 10px 18px; font-size: 13px; cursor: pointer; font-family: inherit; margin-bottom: -1px; transition: color 0.2s; }
+
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ── table ── */
+
+  .tbl-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid var(--border); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+
+  thead tr { background: var(--card); }
+
+  th { padding: 12px 14px; text-align: left; color: var(--muted); font-weight: 500; border-bottom: 1px solid var(--border); font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap; }
+
+  tbody tr:nth-child(even) { background: var(--surface); }
+
+  tbody tr:nth-child(odd) { background: var(--card); }
+
+  td { padding: 11px 14px; border-bottom: 1px solid var(--border); line-height: 1.5; }
+
+  td:last-child, th:last-child { text-align: center; }
+
+  .tag { display: inline-block; border-radius: 6px; padding: 3px 9px; font-size: 11px; font-weight: 600; }
+
+  .tag-ans { background: rgba(78,203,141,0.15); color: var(--green); border: 1px solid rgba(78,203,141,0.3); }
+
+  /* ── chart bars ── */
+
+  .chart-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 24px 28px; margin-bottom: 28px; }
+
+  .bar-row { margin-bottom: 14px; }
+
+  .bar-label-row { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 13px; }
+
+  .bar-track { background: var(--border); border-radius: 99px; height: 10px; overflow: hidden; }
+
+  .bar-fill { height: 100%; border-radius: 99px; transition: width 1.2s cubic-bezier(0.22,1,0.36,1); }
+
+  /* ── chapter cards ── */
+
+  .chapter-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 18px; }
+
+  .chapter-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; border-left: 4px solid; }
+
+  .cc-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
+
+  .cc-title { font-weight: 600; font-size: 14px; line-height: 1.4; }
+
+  .cc-badge { border-radius: 8px; padding: 4px 10px; font-size: 13px; font-weight: 700; white-space: nowrap; margin-left: 10px; }
+
+  .cc-divider { height: 1px; background: var(--border); margin-bottom: 12px; }
+
+  .cc-sub-lbl { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+
+  .cc-sub-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px; }
+
+  .cc-sub-name { color: var(--muted); font-size: 12px; line-height: 1.4; padding-right: 12px; }
+
+  .cc-sub-cnt { font-size: 12px; font-weight: 700; border-radius: 5px; padding: 2px 7px; white-space: nowrap; }
+
+  .cc-footer { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+
+  .cc-footer-row { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 6px; }
+
+  .cc-footer-bar { background: var(--border); border-radius: 99px; height: 5px; overflow: hidden; }
+
+  .cc-footer-fill { height: 100%; border-radius: 99px; }
+
+  /* ── insights ── */
+
+  .insights { background: rgba(61,79,160,0.2); border: 1px solid var(--acc-soft); border-radius: 12px; padding: 20px 24px; margin-top: 24px; }
+
+  .insights h3 { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 15px; color: var(--accent); margin-bottom: 12px; }
+
+  .insight-row { display: flex; gap: 10px; font-size: 13px; margin-bottom: 8px; line-height: 1.5; }
+
+  .insight-bullet { color: var(--accent); flex-shrink: 0; }
+
+  /* ── error ── */
+
+  .error-box { background: rgba(224,92,92,0.1); border: 1px solid rgba(224,92,92,0.4); border-radius: 10px; padding: 16px 20px; color: var(--red); font-size: 13px; margin-top: 16px; text-align: center; }
+
+  /* ── responsive ── */
+
+  @media (max-width: 700px) {
+
+    .upload-grid { grid-template-columns: 1fr; }
+
+    .summary-grid { grid-template-columns: repeat(2, 1fr); }
+
+    .header { padding: 14px 16px; }
+
+    .main { padding: 24px 14px; }
+
+    .upload-hero h1 { font-size: 26px; }
+
+  }
+
+  /* ── hide utility ── */
+
+  .hidden { display: none !important; }
+
+</style>
+
+</head>
+
+<body>
+
+<!-- ── Header ────────────────────────────────────────────────────────────── -->
+
+<header class="header">
+
+  <div class="logo-icon">⚛</div>
+
+  <div>
+
+    <div class="logo-title">PhysicsAnalyser</div>
+
+    <div class="logo-sub">IGCSE Question Paper × Syllabus Mapping Engine</div>
+
+  </div>
+
+  <div class="header-actions" id="headerActions" style="display:none">
+
+    <button class="btn btn-ghost" onclick="resetApp()">↩ New Analysis</button>
+
+    <button class="btn btn-green" onclick="exportExcel()">⬇ Export Excel</button>
+
+  </div>
+
+</header>
+
+<!-- ── Main ──────────────────────────────────────────────────────────────── -->
+
+<main class="main">
+
+  <!-- UPLOAD -->
+
+  <div id="uploadScreen">
+
+    <div class="upload-hero">
+
+      <h1>Analyse Your Question Paper</h1>
+
+      <p>Upload the IGCSE Physics question paper and syllabus PDF. The AI will parse every question, map it to the correct syllabus topic, and generate a chapter-wise weightage report.</p>
+
+    </div>
+
+    <div class="upload-grid">
+
+      <!-- QP drop zone -->
+
+      <div class="dropzone" id="dzQP" onclick="document.getElementById('fileQP').click()" ondrop="handleDrop(event,'qp')" ondragover="handleDragOver(event,'dzQP')" ondragleave="handleDragLeave('dzQP')">
+
+        <input type="file" id="fileQP" accept=".pdf" style="display:none" onchange="handleFile(this,'qp')" />
+
+        <div class="dz-icon" id="iconQP">📄</div>
+
+        <div class="dz-label">Question Paper</div>
+
+        <div class="dz-hint">PDF · Max 20 MB</div>
+
+        <div class="dz-filename hidden" id="nameQP"></div>
+
+        <div class="dz-cta" id="ctaQP">Click or drag to upload</div>
+
+      </div>
+
+      <!-- Syllabus drop zone -->
+
+      <div class="dropzone" id="dzSYL" onclick="document.getElementById('fileSYL').click()" ondrop="handleDrop(event,'syl')" ondragover="handleDragOver(event,'dzSYL')" ondragleave="handleDragLeave('dzSYL')">
+
+        <input type="file" id="fileSYL" accept=".pdf" style="display:none" onchange="handleFile(this,'syl')" />
+
+        <div class="dz-icon" id="iconSYL">📋</div>
+
+        <div class="dz-label">Syllabus Document</div>
+
+        <div class="dz-hint">PDF · Max 10 MB</div>
+
+        <div class="dz-filename hidden" id="nameSYL"></div>
+
+        <div class="dz-cta" id="ctaSYL">Click or drag to upload</div>
+
+      </div>
+
+    </div>
+
+    <div class="upload-center">
+
+      <button class="btn btn-accent" id="analyseBtn" onclick="startAnalysis()" disabled style="padding:14px 52px;font-size:15px;">
+
+        ▶ Analyse Paper
+
+      </button>
+
+      <div style="color:var(--muted);font-size:12px;margin-top:10px" id="uploadHint">Upload both files to continue</div>
+
+      <div class="error-box hidden" id="errorBox"></div>
+
+    </div>
+
+  </div>
+
+  <!-- PROGRESS -->
+
+  <div id="progressScreen" class="hidden">
+
+    <div class="progress-wrap">
+
+      <div style="font-size:48px;margin-bottom:20px">🔬</div>
+
+      <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:800;margin-bottom:8px">Analysing Paper…</div>
+
+      <div style="color:var(--muted);font-size:13px;margin-bottom:40px">Parsing questions · Mapping syllabus topics · Computing weightage</div>
+
+      <div class="progress-bar-track">
+
+        <div class="progress-bar-fill" id="progressFill" style="width:0%"></div>
+
+      </div>
+
+      <div style="color:var(--muted);font-size:12px;margin-top:10px" id="progressPct">0% complete</div>
+
+      <div class="progress-steps" id="progressSteps">
+
+        <div class="step-row step-pending" id="step0">○ Extracting text from PDFs…</div>
+
+        <div class="step-row step-pending" id="step1">○ Loading syllabus structure…</div>
+
+        <div class="step-row step-pending" id="step2">○ Mapping questions to topics…</div>
+
+        <div class="step-row step-pending" id="step3">○ Calculating chapter weightage…</div>
+
+        <div class="step-row step-pending" id="step4">○ Generating insights…</div>
+
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- RESULT -->
+
+  <div id="resultScreen" class="hidden">
+
+    <!-- Summary cards -->
+
+    <div class="summary-grid" id="summaryCards"></div>
+
+    <!-- Tabs -->
+
+    <div class="tabs">
+
+      <button class="tab active" id="tabQuestions" onclick="switchTab('questions')">📋 Question Mapping</button>
+
+      <button class="tab" id="tabReport" onclick="switchTab('report')">📊 Weightage Report</button>
+
+    </div>
+
+    <!-- Questions tab -->
+
+    <div id="panelQuestions">
+
+      <div class="tbl-wrap">
+
+        <table>
+
+          <thead>
+
+            <tr>
+
+              <th>Q#</th>
+
+              <th>Question Summary</th>
+
+              <th>Topic</th>
+
+              <th>Subtopic</th>
+
+              <th>Ans</th>
+
+            </tr>
+
+          </thead>
+
+          <tbody id="questionsTbody"></tbody>
+
+        </table>
+
+      </div>
+
+    </div>
+
+    <!-- Report tab -->
+
+    <div id="panelReport" class="hidden">
+
+      <div style="margin-bottom:24px">
+
+        <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;margin-bottom:4px">Chapter-wise Weightage</div>
+
+        <div style="color:var(--muted);font-size:12px">Questions and marks percentage per IGCSE topic chapter</div>
+
+      </div>
+
+      <div class="chart-wrap" id="chartWrap"></div>
+
+      <div class="chapter-grid" id="chapterGrid"></div>
+
+      <div class="insights" id="insightsBox"></div>
+
+    </div>
+
+  </div>
+
+</main>
+
+<script>
+
+// ── State ─────────────────────────────────────────────────────────────────────
+
+let fileQP = null, fileSYL = null, analysisData = null;
+
+const TOPIC_COLORS = [
+
+  "#6c8bff","#4ecb8d","#f5a623","#e05c5c","#a78bfa",
+
+  "#38bdf8","#fb923c","#34d399","#f472b6","#facc15"
+
+];
+
+// Detect API base — same origin in prod, localhost:3001 in dev
+
+const API_BASE = window.location.hostname === "localhost" && window.location.port !== "3001"
+
+  ? "http://localhost:3001"
+
+  : "";
+
+// ── File handling ─────────────────────────────────────────────────────────────
+
+function handleFile(input, which) {
+
+  const file = input.files[0];
+
+  if (!file) return;
+
+  setFile(which, file);
 
 }
 
-// ================= RENDER IMAGES =================
+function handleDrop(e, which) {
 
-class NodeCanvasFactory {
+  e.preventDefault();
 
-  create(width, height) {
+  handleDragLeave(which === "qp" ? "dzQP" : "dzSYL");
 
-    const canvas = createCanvas(width, height);
+  const file = e.dataTransfer.files[0];
 
-    const context = canvas.getContext("2d");
-
-    return { canvas, context };
-
-  }
-
-  reset(canvasAndContext, width, height) {
-
-    canvasAndContext.canvas.width = width;
-
-    canvasAndContext.canvas.height = height;
-
-  }
-
-  destroy(canvasAndContext) {
-
-    canvasAndContext.canvas.width = 0;
-
-    canvasAndContext.canvas.height = 0;
-
-    canvasAndContext.canvas = null;
-
-    canvasAndContext.context = null;
-
-  }
+  if (file && file.type === "application/pdf") setFile(which, file);
 
 }
 
-/*   async function renderPdfPageImages(buffer, pageNums) {
+function handleDragOver(e, id) { e.preventDefault(); document.getElementById(id).classList.add("drag"); }
 
-  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+function handleDragLeave(id) { document.getElementById(id).classList.remove("drag"); }
 
-  const pdf = await pdfjsLib.getDocument({
+function setFile(which, file) {
 
-    data: new Uint8Array(buffer),
+  const isQP = which === "qp";
 
-    disableFontFace: true,
+  if (isQP) fileQP = file; else fileSYL = file;
 
-    useSystemFonts: true,
+  const dz = document.getElementById(isQP ? "dzQP" : "dzSYL");
 
-  }).promise;
+  const icon = document.getElementById(isQP ? "iconQP" : "iconSYL");
 
-  const pageImages = {};
+  const name = document.getElementById(isQP ? "nameQP" : "nameSYL");
 
-  const canvasFactory = new NodeCanvasFactory();
+  const cta  = document.getElementById(isQP ? "ctaQP"  : "ctaSYL");
 
-  for (const pageNum of pageNums) {
+  dz.classList.add("filled");
 
-    try {
+  icon.textContent = "✅";
 
-      const page = await pdf.getPage(pageNum);
+  name.textContent = file.name;
 
-      const viewport = page.getViewport({ scale: 1.15 });
+  name.classList.remove("hidden");
 
-      const canvasAndContext = canvasFactory.create(
+  cta.classList.add("hidden");
 
-        viewport.width,
-
-        viewport.height
-
-      );
-
-      await page.render({
-
-        canvasContext: canvasAndContext.context,
-
-        viewport,
-
-        canvasFactory,
-
-      }).promise;
-
-      pageImages[pageNum] =
-
-        canvasAndContext.canvas.toDataURL("image/png");
-
-      canvasFactory.destroy(canvasAndContext);
-
-    } catch (err) {
-
-      console.error(`Failed to render page ${pageNum}:`, err.message);
-
-    }
-
-  }
-
-  return pageImages;
-
-} *****/
-
-// ================= PAPER TYPE =================
-
-function detectPaperType(pages) {
-
-  const text = pages.slice(0, 3).map((p) => p.text).join(" ").toLowerCase();
-
-  if (text.includes("multiple choice") || text.includes("paper 2") || text.includes("mcqs")) return "MCQ";
-
-  if (text.includes("theory") || text.includes("paper 4")) return "THEORY";
-
-  if (text.includes("alternative to practical") || text.includes("paper 6")) return "PRACTICAL";
-
-  return "UNKNOWN";
+  updateAnalyseBtn();
 
 }
 
-// ================= QUESTION PAGE DETECTION =================
+function updateAnalyseBtn() {
 
-function scorePage(text) {
+  const btn = document.getElementById("analyseBtn");
 
-  if (!text || text.trim().length < 40) return -10;
+  const hint = document.getElementById("uploadHint");
 
-  const clean = text.replace(/\s+/g, " ").trim();
+  btn.disabled = !(fileQP && fileSYL);
 
-  const lower = clean.toLowerCase();
-
-  let score = 0;
-
-  const negativePatterns = [
-
-    "blank page", "candidate name", "centre number", "candidate number",
-
-    "copyright acknowledgements", "permission to reproduce", "multiple choice answer sheet",
-
-  ];
-
-  negativePatterns.forEach((p) => { if (lower.includes(p)) score -= 3; });
-
-  const positivePatterns = [
-
-    /\b\d{1,3}[\.)]?\s+(a|an|the|which|what|why|how|identify|calculate|state|explain|describe)/i,
-
-    /\(a\)/i, /\(b\)/i, /\[\d+\]/, /calculate|state|explain|describe|which|what/i,
-
-    /A\s+.*B\s+.*C\s+.*D/i,
-
-  ];
-
-  positivePatterns.forEach((p) => { if (p.test(clean)) score += 3; });
-
-  if (clean.length > 250) score += 2;
-
-  return score;
+  hint.style.display = (fileQP && fileSYL) ? "none" : "";
 
 }
 
-function getQuestionPages(pages) {
+// ── Analysis ──────────────────────────────────────────────────────────────────
 
-  const scored = pages.map((p) => ({ ...p, score: scorePage(p.text) }));
+async function startAnalysis() {
 
-  let questionPages = scored.filter((p) => p.score >= 3);
+  document.getElementById("errorBox").classList.add("hidden");
 
-  if (questionPages.length === 0) questionPages = scored.filter((p) => p.score > 0);
+  show("progressScreen"); hide("uploadScreen");
 
-  if (questionPages.length === 0) questionPages = pages;
+  // Animate progress independently while waiting for API
 
-  return questionPages;
+  let prog = 0;
 
-}
+  const steps = [0,1,2,3,4];
 
-// ================= EXPECTED QUESTION COUNT =================
+  const stepThresholds = [10,25,50,75,90];
 
-function wordToNumber(word) {
+  const iv = setInterval(() => {
 
-  const map = {
+    prog = Math.min(prog + (Math.random() * 8 + 2), 92);
 
-    one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7,
+    document.getElementById("progressFill").style.width = prog + "%";
 
-    eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13,
+    document.getElementById("progressPct").textContent = Math.round(prog) + "% complete";
 
-    fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18,
+    steps.forEach((s, i) => {
 
-    nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60,
+      const el = document.getElementById("step" + s);
 
-  };
+      if (prog >= stepThresholds[i]) {
 
-  return map[word.toLowerCase()] || null;
+        el.classList.remove("step-pending"); el.classList.add("step-done");
 
-}
+        el.textContent = "✓ " + el.textContent.replace(/^[○✓] /, "");
 
-function detectExpectedQuestionCount(pages, paperType) {
-
-  const fullText = pages.map((p) => p.text).join(" ");
-
-  const wordNums = {
-
-    one: 1, two: 2, three: 3, four: 4, five: 5,
-
-    six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
-
-    eleven: 11, twelve: 12, thirteen: 13, fourteen: 14,
-
-    fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18,
-
-    nineteen: 19, twenty: 20, thirty: 30, forty: 40,
-
-    fifty: 50, sixty: 60
-
-  };
-
-  const explicit = fullText.match(/there\s+are\s+([a-z]+|\d+)\s+questions/i);
-
-  if (explicit) {
-
-    const val = explicit[1].toLowerCase();
-
-    const n = /^\d+$/.test(val) ? parseInt(val, 10) : wordNums[val];
-
-    if (n && n >= 10) return n;
-
-  }
-
-  const maxMarks = fullText.match(/maximum\s+marks\s*[:\-]?\s*(\d+)/i);
-
-  if (paperType === "MCQ" && maxMarks) {
-
-    const n = parseInt(maxMarks[1], 10);
-
-    if (n >= 10) return n;
-
-  }
-
-  const totalMark = fullText.match(/total\s+mark\s+for\s+this\s+paper\s+is\s+(\d+)/i);
-
-  if (paperType === "MCQ" && totalMark) {
-
-    const n = parseInt(totalMark[1], 10);
-
-    if (n >= 10) return n;
-
-  }
-
-  return null;
-
-}
-
-// ================= MCQ EXTRACTION =================
-
-function cleanQuestionText(text, qNum) {
-
-  return text
-
-    .replace(new RegExp(`^\\s*${qNum}[\\.):]?\\s+`), "")
-
-    .replace(/<<<PAGE:\d+>>>/g, " ")
-
-    .replace(/Page\s+\d+\s+of\s+\d+/gi, " ")
-
-    .replace(/\s+/g, " ")
-
-    .trim()
-
-    .slice(0, 120);
-
-}
-
-function extractMcqQuestionsFromText(pages, expectedCount) {
-
-  const fullText = pages
-
-    .map((p) => ` <<<PAGE:${p.pageNum}>>> ${p.text}`)
-
-    .join(" ")
-
-    .replace(/\s+/g, " ")
-
-    .trim();
-
-  const questions = [];
-
-  const starter =
-
-  "(A|An|The|Which|What|Why|How|Identify|Calculate|State|Explain|Describe|Both|Equal|One|Two|Three|Four|Graph|Uranium|Intruder|A\\s+satellite|One\\s+nuclear)";
-
-  const candidateRegex = new RegExp(
-
-    `(?:^|\\s)(\\d{1,3})[\\.)]?\\s+(?=${starter}\\b)`,
-
-    "gi"
-
-  );
-
-  const candidates = [];
-
-  let match;
-
-  while ((match = candidateRegex.exec(fullText)) !== null) {
-
-    const qNum = parseInt(match[1], 10);
-
-    if (qNum >= 1 && qNum <= 200) {
-
-      const digitIndex = match[0].search(/\d/);
-
-      const start = match.index + digitIndex;
-
-      candidates.push({
-
-        q: qNum,
-
-        start,
-
-      });
-
-    }
-
-  }
-
-// Fallback: catch missed numbered questions like "31 Graph 1 shows..."
-
-for (let n = 1; n <= (expectedCount || 60); n++) {
-
-  const already = candidates.some((c) => c.q === n);
-
-  if (already) continue;
-
-  const looseRegex = new RegExp(`(?:^|\\s)${n}[\\.)]?\\s+`, "g");
-
-  let looseMatch;
-
-  while ((looseMatch = looseRegex.exec(fullText)) !== null) {
-
-    const after = fullText.slice(looseRegex.lastIndex, looseRegex.lastIndex + 80);
-
-    if (
-
-      after.trim().length > 10 &&
-
-      !/^[\\d\\.\\-\\/\\s]+$/.test(after.slice(0, 20)) &&
-
-      !after.toLowerCase().startsWith("page") &&
-
-      !after.toLowerCase().startsWith("cambridge") &&
-
-      !after.toLowerCase().startsWith("copyright")
-
-    ) {
-
-      const digitIndex = looseMatch[0].search(/\d/);
-
-      candidates.push({
-
-        q: n,
-
-        start: looseMatch.index + digitIndex,
-
-      });
-
-      break;
-
-    }
-
-  }
-
-}
-
-  if (candidates.length === 0) return questions;
-
-  candidates.sort((a, b) => a.start - b.start);
-
-  const highestDetected = Math.max(...candidates.map((c) => c.q));
-
-  const effectiveCount =
-
-    expectedCount && expectedCount >= 10
-
-      ? expectedCount
-
-      : highestDetected;
-
-  const starts = [];
-
-  let lastStart = -1;
-
-  for (let n = 1; n <= effectiveCount; n++) {
-
-    const found = candidates.find(
-
-      (c) => c.q === n && c.start > lastStart
-
-    );
-
-    if (found) {
-
-      const before = fullText.slice(0, found.start);
-
-      const pageMatches = [...before.matchAll(/<<<PAGE:(\d+)>>>/g)];
-
-      const pageNum = pageMatches.length
-
-        ? parseInt(pageMatches[pageMatches.length - 1][1], 10)
-
-        : null;
-
-      starts.push({
-
-        q: n,
-
-        start: found.start,
-
-        pageNum,
-
-      });
-
-      lastStart = found.start;
-
-    }
-
-  }
-
-  for (let i = 0; i < starts.length; i++) {
-
-    const current = starts[i];
-
-    const next = starts[i + 1];
-
-    const raw = fullText.slice(
-
-      current.start,
-
-      next ? next.start : fullText.length
-
-    );
-
-    const text = raw
-
-      .replace(/<<<PAGE:\d+>>>/g, " ")
-
-      .replace(new RegExp(`^\\s*${current.q}[\\.)]?\\s+`), "")
-
-      .replace(/Page\s+\d+\s+of\s+\d+/gi, " ")
-
-      .replace(/© Cambridge University Press & Assessment \d{4}/gi, " ")
-
-      .replace(/\b0625\/\d+\/[A-Z]\/[A-Z]\/\d+\b/gi, " ")
-
-      .replace(/\[Turn over\]/gi, " ")
-
-      .replace(/Permission to reproduce[\s\S]*?Cambridge International Education/gi, " ")
-
-      .replace(/\s+/g, " ")
-
-      .trim();
-
-    if (text) {
-
-      questions.push({
-
-        q: current.q,
-
-        text,
-
-        topic: "Unmapped",
-
-        subtopic: "Unmapped",
-
-        answer: "",
-
-        marks: 1,
-
-        pageNum: current.pageNum,
-
-      });
-
-    }
-
-  }
-
-  return questions;
-
-}
-
-//function added for image rendering
-
-function assignPageNumsToQuestions(finalQuestions, qpPages) {
-
-  return finalQuestions.map((q) => {
-
-    if (q.pageNum) return q;
-
-    const qNum = parseInt(q.q, 10);
-
-    const matchedPage = qpPages.find((p) => {
-
-      const regex = new RegExp(`(^|\\n|\\s)${qNum}[\\.)]?\\s+`);
-
-      return regex.test(p.text);
+      }
 
     });
 
-    return {
+  }, 300);
 
-      ...q,
+  try {
 
-      pageNum: matchedPage ? matchedPage.pageNum : null,
+    const form = new FormData();
 
-    };
+    form.append("questionPaper", fileQP);
+
+    form.append("syllabus", fileSYL);
+
+    const res = await fetch(`${API_BASE}/api/analyse`, { method: "POST", body: form });
+
+    const json = await res.json();
+
+    clearInterval(iv);
+
+    if (!res.ok || !json.success) throw new Error(json.error || "Analysis failed");
+
+    // Finish progress bar
+
+    document.getElementById("progressFill").style.width = "100%";
+
+    document.getElementById("progressPct").textContent = "100% complete";
+
+    steps.forEach(s => {
+
+      const el = document.getElementById("step" + s);
+
+      el.classList.remove("step-pending"); el.classList.add("step-done");
+
+      el.textContent = "✓ " + el.textContent.replace(/^[○✓] /, "");
+
+    });
+
+    analysisData = json.data;
+
+    setTimeout(() => { hide("progressScreen"); renderResults(); }, 500);
+
+  } catch (err) {
+
+    clearInterval(iv);
+
+    hide("progressScreen"); show("uploadScreen");
+
+    const eb = document.getElementById("errorBox");
+
+    eb.textContent = "❌ " + (err.message || "Something went wrong. Please try again.");
+
+    eb.classList.remove("hidden");
+
+  }
+
+}
+
+// ── Render Results ────────────────────────────────────────────────────────────
+
+function renderResults() {
+
+  const d = analysisData;
+
+let pdfObjectUrl = "";
+
+if (d.questionPaperBase64) {
+
+  const byteCharacters = atob(d.questionPaperBase64);
+
+  const byteNumbers = new Array(byteCharacters.length);
+
+  for (let i = 0; i < byteCharacters.length; i++) {
+
+    byteNumbers[i] = byteCharacters.charCodeAt(i);
+
+  }
+
+  const byteArray = new Uint8Array(byteNumbers);
+
+  const blob = new Blob([byteArray], { type: "application/pdf" });
+
+  pdfObjectUrl = URL.createObjectURL(blob);
+
+}
+
+ 
+
+  show("resultScreen");
+
+  document.getElementById("headerActions").style.display = "flex";
+
+  // Summary cards
+
+  const uniqueSubtopics = new Set();
+
+  d.questions.forEach(q => q.subtopic.split("/").forEach(s => uniqueSubtopics.add(s.trim())));
+
+  document.getElementById("summaryCards").innerHTML = [
+
+    { label: "Total Questions", value: d.totalQuestions, icon: "❓", color: "var(--accent)" },
+
+    { label: "Total Marks",     value: d.totalQuestions, icon: "🏆", color: "var(--green)" },
+
+    { label: "Topics Covered",  value: d.chapterSummary.length, icon: "📚", color: "var(--amber)" },
+
+    { label: "Subtopics Mapped",value: uniqueSubtopics.size, icon: "🔗", color: "#a78bfa" },
+
+  ].map(c => `
+
+    <div class="summary-card">
+
+      <div class="sc-icon">${c.icon}</div>
+
+      <div class="sc-val" style="color:${c.color}">${c.value}</div>
+
+      <div class="sc-lbl">${c.label}</div>
+
+    </div>`).join("");
+
+  // Questions table
+
+  // Questions table
+
+document.getElementById("questionsTbody").innerHTML = d.questions.map((q, i) => {
+
+  const ci = d.chapterSummary.findIndex(c => c.chapter === q.topic);
+
+  const color = TOPIC_COLORS[(ci < 0 ? i : ci) % TOPIC_COLORS.length];
+
+  const canvasId = `qcanvas-${q.q}`;
+
+  const imageHtml = q.pageNum && pdfObjectUrl
+
+    ? `<div style="margin-top:14px">
+        <canvas id="${canvasId}" style="max-width:100%;border-radius:10px;border:1px solid #334155;display:block;"></canvas>
+      </div>`
+
+    : "";
+
+  return `
+
+    <tr>
+
+      <td style="color:var(--accent);font-weight:700;white-space:nowrap">
+
+        ${q.q}
+
+      </td>
+
+      <td style="max-width:700px">
+
+        <div style="
+
+          font-size:14px;
+
+          line-height:1.7;
+
+          white-space:pre-wrap;
+
+          color:#f1f5f9;
+
+          margin-bottom:8px;
+
+        ">
+
+          ${escHtml(q.fullText || q.text)}
+
+        </div>
+
+        ${imageHtml}
+
+      </td>
+
+      <td>
+
+        <span class="tag"
+
+          style="
+
+            background:${color}22;
+
+            color:${color};
+
+            border:1px solid ${color}44
+
+          ">
+
+          ${escHtml(q.topic)}
+
+        </span>
+
+      </td>
+
+      <td style="
+
+        color:var(--muted);
+
+        font-size:12px;
+
+        max-width:260px
+
+      ">
+
+        ${escHtml(q.subtopic)}
+
+      </td>
+
+      <td>
+
+        <span class="tag tag-ans">
+
+          ${q.answer || "—"}
+
+        </span>
+
+      </td>
+
+    </tr>
+
+  `;
+
+}).join("");
+
+  // Render cropped question images using PDF.js
+  if (pdfObjectUrl && window.pdfjsLib) {
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    const loadingTask = window.pdfjsLib.getDocument(pdfObjectUrl);
+    loadingTask.promise.then(pdfDoc => {
+      d.questions.forEach(q => {
+        if (!q.pageNum) return;
+        const canvasId = "qcanvas-" + q.q;
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        pdfDoc.getPage(q.pageNum).then(page => {
+          const scale = 1.8;
+          const viewport = page.getViewport({ scale });
+          // Render full page to offscreen canvas
+          const offscreen = document.createElement("canvas");
+          offscreen.width = viewport.width;
+          offscreen.height = viewport.height;
+          const ctx = offscreen.getContext("2d");
+          page.render({ canvasContext: ctx, viewport }).promise.then(() => {
+            // Find which question index this is on the page
+            const pageQs = d.questions.filter(x => x.pageNum === q.pageNum).map(x => x.q);
+            const posOnPage = pageQs.indexOf(q.q);
+            const totalOnPage = pageQs.length;
+            // Estimate crop region: divide page height by questions on page
+            const sliceH = Math.floor(offscreen.height / Math.max(totalOnPage, 1));
+            const cropY = posOnPage * sliceH;
+            const cropH = Math.min(sliceH, offscreen.height - cropY);
+            // Add small padding
+            const padTop = posOnPage > 0 ? 10 : 0;
+            const padBot = 10;
+            canvas.width = offscreen.width;
+            canvas.height = cropH - padTop;
+            const dstCtx = canvas.getContext("2d");
+            dstCtx.drawImage(offscreen, 0, cropY + padTop, offscreen.width, cropH - padTop, 0, 0, offscreen.width, cropH - padTop);
+          });
+        });
+      });
+    }).catch(err => console.warn("PDF.js render error:", err));
+  }
+
+  // Chart bars
+
+  const sorted = [...d.chapterSummary].sort((a,b) => b.count - a.count);
+
+  document.getElementById("chartWrap").innerHTML = `
+
+    <div style="font-family:'Syne',sans-serif;font-size:15px;font-weight:700;margin-bottom:20px">Questions per Chapter</div>
+
+    ${sorted.map((ch, i) => {
+
+      const color = TOPIC_COLORS[i % TOPIC_COLORS.length];
+
+      return `<div class="bar-row">
+
+        <div class="bar-label-row">
+
+          <span>${escHtml(ch.chapter)}</span>
+
+          <span style="color:${color};font-weight:700">${ch.count}Q &nbsp;·&nbsp; ${ch.pct.toFixed(1)}%</span>
+
+        </div>
+
+        <div class="bar-track"><div class="bar-fill" style="width:${ch.pct}%;background:${color}"></div></div>
+
+      </div>`;
+
+    }).join("")}`;
+
+  // Chapter cards
+
+  document.getElementById("chapterGrid").innerHTML = sorted.map((ch, i) => {
+
+    const color = TOPIC_COLORS[i % TOPIC_COLORS.length];
+
+    return `<div class="chapter-card" style="border-left-color:${color}">
+
+      <div class="cc-header">
+
+        <div class="cc-title">${escHtml(ch.chapter)}</div>
+
+        <div class="cc-badge" style="background:${color}22;color:${color};border:1px solid ${color}44">${ch.count} / ${d.totalQuestions}</div>
+
+      </div>
+
+      <div class="cc-divider"></div>
+
+      <div class="cc-sub-lbl">Subtopics</div>
+
+      ${(ch.subtopics || []).map(s => `
+
+        <div class="cc-sub-row">
+
+          <span class="cc-sub-name">${escHtml(s.name)}</span>
+
+          <span class="cc-sub-cnt" style="color:${color};background:${color}18">${s.count}Q</span>
+
+        </div>`).join("")}
+
+      <div class="cc-footer">
+
+        <div class="cc-footer-row">
+
+          <span style="color:var(--muted)">Marks contribution</span>
+
+          <span style="color:${color};font-weight:700">${ch.pct.toFixed(1)}%</span>
+
+        </div>
+
+        <div class="cc-footer-bar"><div class="cc-footer-fill" style="width:${ch.pct}%;background:${color}"></div></div>
+
+      </div>
+
+    </div>`;
+
+  }).join("");
+
+  // Insights
+
+  document.getElementById("insightsBox").innerHTML = `
+
+    <h3>🔍 Key Insights</h3>
+
+    ${(d.insights || []).map(ins => `
+
+      <div class="insight-row">
+
+        <span class="insight-bullet">›</span>
+
+        <span>${escHtml(ins)}</span>
+
+      </div>`).join("")}`;
+
+}
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+
+function switchTab(tab) {
+
+  ["questions","report"].forEach(t => {
+
+    document.getElementById("tab" + cap(t)).classList.toggle("active", t === tab);
+
+    document.getElementById("panel" + cap(t)).classList.toggle("hidden", t !== tab);
 
   });
 
 }
 
-// ================= CHUNKING =================
+function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
-function buildChunks(questionPages, paperType) {
+// ── Export Excel (two sheets) ─────────────────────────────────────────────────
 
-  const maxChars = paperType === "MCQ" ? 1400 : 1200;
+function exportExcel() {
 
-  const chunks = [];
+  if (!analysisData) return;
 
-  let current = [];
+  const wb = XLSX.utils.book_new();
 
-  let currentLen = 0;
+  // ── Sheet 1: Question Mapping ──────────────────────────────────────────────
 
-  for (const page of questionPages) {
+  const qRows = [
 
-    const pageLen = page.text.length;
+    ["Q No", "Question", "Topic", "Subtopic", "Answer"],
 
-    if (current.length > 0 && currentLen + pageLen > maxChars) {
+    ...analysisData.questions.map(r => [
 
-      chunks.push(current);
+      r.q,
 
-      current = [];
+      r.text || "",
 
-      currentLen = 0;
+      r.topic || "",
 
-    }
+      r.subtopic || "",
 
-    current.push(page);
+      r.answer || ""
 
-    currentLen += pageLen;
+    ])
 
-  }
+  ];
 
-  if (current.length > 0) chunks.push(current);
+  const ws1 = XLSX.utils.aoa_to_sheet(qRows);
 
-  return chunks;
+  // Column widths for sheet 1
 
-}
+  ws1["!cols"] = [
 
-// ================= MULTER =================
+    { wch: 6 },   // Q No
 
-const upload = multer({
+    { wch: 55 },  // Question
 
-  storage: multer.memoryStorage(),
+    { wch: 28 },  // Topic
 
-  limits: { fileSize: 30 * 1024 * 1024 },
+    { wch: 35 },  // Subtopic
 
-  fileFilter: (req, file, cb) => {
+    { wch: 8 },   // Answer
 
-    if (file.mimetype === "application/pdf") cb(null, true);
+  ];
 
-    else cb(new Error("Only PDF files are allowed."));
+  // Style header row bold (SheetJS CE supports basic cell props)
 
-  },
+  ["A1","B1","C1","D1","E1"].forEach(cell => {
 
-});
+    if (ws1[cell]) ws1[cell].s = { font: { bold: true } };
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  });
 
-// ================= GROQ CALL =================
+  XLSX.utils.book_append_sheet(wb, ws1, "Question Mapping");
 
-async function callGroq(groq, prompt, retries = 3) {
+  // ── Sheet 2: Weightage ─────────────────────────────────────────────────────
 
-  for (let attempt = 0; attempt < retries; attempt++) {
+  const total = analysisData.totalQuestions;
 
-    try {
+  const weightageRows = [
 
-      const completion = await groq.chat.completions.create({
+    ["Chapter", "No. of Questions", "Marks %", "Subtopic", "Subtopic Question Count"],
 
-        messages: [
+  ];
 
-          { role: "system", content: "You are a JSON API. Return ONLY valid JSON. No explanation. No markdown." },
+  const sorted = [...(analysisData.chapterSummary || [])].sort((a, b) => b.count - a.count);
 
-          { role: "user", content: prompt },
+  sorted.forEach(ch => {
 
-        ],
+    const subs = ch.subtopics || [];
 
-        model: "llama-3.1-8b-instant",
+    if (subs.length === 0) {
 
-        temperature: 0,
+      weightageRows.push([ch.chapter, ch.count, ch.pct + "%", "", ""]);
 
-        max_tokens: 900,
+    } else {
 
-        response_format: { type: "json_object" },
+      subs.forEach((s, i) => {
 
-      });
+        if (i === 0) {
 
-      const raw = completion.choices[0]?.message?.content?.trim() || "";
+          // First row for this chapter — include chapter info
 
-      const parsed = JSON.parse(raw);
+          weightageRows.push([ch.chapter, ch.count, ch.pct + "%", s.name, s.count]);
 
-      if (Array.isArray(parsed.questions)) return parsed.questions;
+        } else {
 
-      if (Array.isArray(parsed.mappings)) return parsed.mappings;
+          // Subsequent subtopic rows — leave chapter columns blank
 
-      if (Array.isArray(parsed)) return parsed;
-
-      return [];
-
-    } catch (err) {
-
-      console.error("Groq JSON error:", err.message);
-
-      if (attempt < retries - 1) { await sleep(3000); continue; }
-
-      throw err;
-
-    }
-
-  }
-
-  return [];
-
-}
-
-// ================= AI TOPIC MAPPING =================
-
-async function mapMcqTopicsWithAI(groq, questions, syllabusText) {
-
-  const mapped = [];
-
-  const batchSize = 6;
-
-  for (let i = 0; i < questions.length; i += batchSize) {
-
-    const batch = questions.slice(i, i + batchSize);
-
-    const prompt = `You are an IGCSE Physics syllabus mapper.
-
-Return ONLY this JSON object:
-
-{
-
-  "questions": [
-
-    { "q": 1, "topic": "IGCSE syllabus chapter", "subtopic": "IGCSE syllabus subtopic" }
-
-  ]
-
-}
-
-SYLLABUS REFERENCE:
-
-${syllabusText}
-
-QUESTIONS TO MAP:
-
-${batch.map((q) => `Q${q.q}: ${q.text}`).join("\n")}
-
-STRICT RULES:
-
-- Return the same q values given. Do not invent new ones.
-
-- Only return topic and subtopic. Return valid JSON only.`;
-
-    try {
-
-      const result = await callGroq(groq, prompt);
-
-      const resultMap = new Map();
-
-      result.forEach((r) => {
-
-        const qNum = parseInt(r.q, 10);
-
-        if (!Number.isNaN(qNum)) resultMap.set(qNum, r);
-
-      });
-
-      batch.forEach((q) => {
-
-        const ai = resultMap.get(q.q);
-
-        mapped.push({
-
-          ...q,
-
-          topic: ai?.topic?.trim() || "Unmapped",
-
-          subtopic: ai?.subtopic?.trim() || "Unmapped",
-
-        });
-
-      });
-
-    } catch (err) {
-
-      console.error("Topic mapping batch failed:", err.message);
-
-      batch.forEach((q) => mapped.push(q));
-
-    }
-
-    if (i + batchSize < questions.length) await sleep(1500);
-
-  }
-
-  return mapped;
-
-}
-
-// ================= API ROUTE =================
-
-app.post(
-
-  "/api/analyse",
-
-  upload.fields([
-
-    { name: "questionPaper", maxCount: 1 },
-
-    { name: "syllabus", maxCount: 1 },
-
-  ]),
-
-  async (req, res) => {
-
-    try {
-
-      if (!req.files?.questionPaper || !req.files?.syllabus) {
-
-        return res.status(400).json({ success: false, error: "Both question paper and syllabus PDFs are required." });
-
-      }
-
-      const [qpPages, sylPages] = await Promise.all([
-
-        extractPdfPages(req.files.questionPaper[0].buffer),
-
-        extractPdfPages(req.files.syllabus[0].buffer),
-
-      ]);
-
-      const paperType = detectPaperType(qpPages);
-
-      const expectedQuestionCount = detectExpectedQuestionCount(qpPages, paperType);
-
-      const questionPages = getQuestionPages(qpPages);
-
-      console.log(`Paper type: ${paperType}, Expected: ${expectedQuestionCount}, Question pages: ${questionPages.length}`);
-
-      const syllabusText = sylPages
-
-        .slice(0, 3)
-
-        .map((p) => `[Page ${p.pageNum}]\n${p.text}`)
-
-        .join("\n\n")
-
-        .slice(0, 1000);
-
-      const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-
-      let allQuestions = [];
-
-      if (paperType === "MCQ" && expectedQuestionCount) {
-
-        const serverExtracted = extractMcqQuestionsFromText(qpPages, expectedQuestionCount);
-
-        console.log("Server extracted MCQs:", serverExtracted.length);
-
-        if (serverExtracted.length > 0) {
-
-          allQuestions = await mapMcqTopicsWithAI(groq, serverExtracted, syllabusText);
+          weightageRows.push(["", "", "", s.name, s.count]);
 
         }
 
-      }
-
-      // Fallback to AI chunking for non-MCQ or if MCQ extraction got too few questions
-
-      const threshold = expectedQuestionCount ? expectedQuestionCount * 0.5 : 5;
-
-      if (allQuestions.length < threshold) {
-
-        console.log(`MCQ extraction got ${allQuestions.length}, falling back to AI chunking`);
-
-        allQuestions = [];
-
-        const chunks = buildChunks(questionPages, paperType);
-
-        for (let i = 0; i < chunks.length; i++) {
-
-          const chunkText = chunks[i].map((p) => `[Page ${p.pageNum}]\n${p.text}`).join("\n\n");
-
-          const prompt = `You are an IGCSE Physics question paper parser.
-
-Paper type: ${paperType}
-
-Return ONLY this JSON object:
-
-{
-
-  "questions": [
-
-    { "q": 1, "text": "brief question summary under 100 chars", "topic": "IGCSE syllabus chapter", "subtopic": "IGCSE syllabus subtopic", "answer": "", "marks": 1 }
-
-  ]
-
-}
-
-SYLLABUS REFERENCE:
-
-${syllabusText}
-
-QUESTION PAPER TEXT:
-
-${chunkText}
-
-RULES:
-
-- Extract every visible numbered question.
-
-- For Theory/Practical: use main question number only.
-
-- Match topic and subtopic to syllabus.
-
-- Return valid JSON only.`;
-
-          const result = await callGroq(groq, prompt);
-
-          if (Array.isArray(result)) allQuestions.push(...result);
-
-          if (i < chunks.length - 1) await sleep(2000);
-
-        }
-
-      }
-
-      // Deduplicate, clean, sort
-
-      const seen = new Set();
-
-      const finalQuestions = allQuestions
-
-        .filter((q) => {
-
-          if (!q || q.q === undefined || q.q === null) return false;
-
-          const qNum = parseInt(q.q, 10);
-
-          if (Number.isNaN(qNum) || seen.has(qNum)) return false;
-
-          seen.add(qNum);
-
-          return true;
-
-        })
-
-        .map((q) => ({
-
-          q: parseInt(q.q, 10),
-
-          text: (q.text || "").replace(/\s+/g, " ").trim().slice(0, 120),
-
-          fullText: (q.text || "").replace(/\s+/g, " ").trim(),
-
-          topic: q.topic?.trim() || "Unmapped",
-
-          subtopic: q.subtopic?.trim() || "Unmapped",
-
-          answer: q.answer || "",
-
-          marks: Number(q.marks) || 1,
-
-          pageNum: q.pageNum || null,
-
-        }))
-
-        .sort((a, b) => a.q - b.q);
-
-      if (finalQuestions.length === 0) {
-
-        return res.status(500).json({ success: false, error: "No questions could be extracted. Please check that the PDF is readable." });
-
-      }
-
-      console.log(`Final question count: ${finalQuestions.length}`);
-
-      // Missing question check
-
-      const missingNums = [];
-
-      if (paperType === "MCQ" && expectedQuestionCount) {
-
-        const extractedNums = new Set(finalQuestions.map((q) => q.q));
-
-        for (let n = 1; n <= expectedQuestionCount; n++) {
-
-          if (!extractedNums.has(n)) missingNums.push(n);
-
-        }
-
-        if (missingNums.length > 0) console.log("Missing questions:", missingNums.join(", "));
-
-      }
-
-      // Build chapter summary
-
-      const chapterMap = {};
-
-      finalQuestions.forEach((q) => {
-
-        const topic = q.topic || "Unmapped";
-
-        const subtopic = q.subtopic || "Unmapped";
-
-        if (!chapterMap[topic]) chapterMap[topic] = { count: 0, marks: 0, subtopics: {} };
-
-        chapterMap[topic].count += 1;
-
-        chapterMap[topic].marks += Number(q.marks) || 1;
-
-        chapterMap[topic].subtopics[subtopic] = (chapterMap[topic].subtopics[subtopic] || 0) + 1;
-
       });
-
-      const chapterSummary = Object.entries(chapterMap)
-
-        .map(([chapter, data]) => ({
-
-          chapter,
-
-          count: data.count,
-
-          marks: data.marks,
-
-          pct: parseFloat(((data.count / finalQuestions.length) * 100).toFixed(1)),
-
-          subtopics: Object.entries(data.subtopics).map(([name, count]) => ({ name, count })),
-
-        }))
-
-        .sort((a, b) => b.count - a.count);
-
-      const top = chapterSummary[0] || { chapter: "N/A", count: 0, pct: 0 };
-
-      const insights = [
-
-        `Paper type detected: ${paperType}`,
-
-        `Expected questions: ${expectedQuestionCount || "Unknown"}`,
-
-        `Extracted questions: ${finalQuestions.length}`,
-
-        `Missing question numbers: ${missingNums.length ? missingNums.join(", ") : "None"}`,
-
-        `Processed ${qpPages.length} pages, ${questionPages.length} question-bearing pages identified.`,
-
-        `Heaviest chapter: "${top.chapter}" with ${top.count} questions (${top.pct}%).`,
-
-        `${finalQuestions.length} questions mapped across ${chapterSummary.length} topic chapters.`,
-
-      ];
-
-       //added for the images
-
-      const finalQuestionsWithPages = assignPageNumsToQuestions(finalQuestions, qpPages);
-
-      const usedPageNums = [
-
-            ...new Set(finalQuestionsWithPages.map((q) => q.pageNum).filter(Boolean)),
-
-        ];
-
-    /*  const pageImages = await renderPdfPageImages(
-
-                req.files.questionPaper[0].buffer,
-
-                usedPageNums
-
-          ); */
-
-      const questionPaperBase64 = req.files.questionPaper[0].buffer.toString("base64");
-
-      // end images
-
-      return res.json({
-
-        success: true,
-
-        data: {
-
-          totalQuestions: finalQuestions.length,
-
-          totalMarks: finalQuestions.reduce((sum, q) => sum + (Number(q.marks) || 1), 0),
-
-          questions: finalQuestionsWithPages,
-
-          chapterSummary,
-
-          insights,
-
-          questionPaperBase64,
-
-          paperTitle: "Physics Question Paper",
-
-          paperInfo: `IGCSE ${paperType}`,
-
-        },
-
-      });
-
-    } catch (err) {
-
-      console.error("Analysis error:", err);
-
-      return res.status(500).json({ success: false, error: err.message || "Analysis failed." });
 
     }
 
-  }
+    // Blank separator row between chapters
 
-);
+    weightageRows.push(["", "", "", "", ""]);
 
-// ================= SERVE FRONTEND =================
+  });
 
-app.use(express.static(path.join(__dirname, "public")));
+  // Summary row at bottom
 
-app.get(/.*/, (req, res) => {
+  weightageRows.push(["TOTAL", total, "100%", "", ""]);
 
-  res.sendFile(path.join(__dirname, "public", "index.html"));
+  const ws2 = XLSX.utils.aoa_to_sheet(weightageRows);
 
-});
+  // Column widths for sheet 2
 
-app.listen(PORT, () => {
+  ws2["!cols"] = [
 
-  console.log(`PhysicsAnalyser running on http://localhost:${PORT}`);
+    { wch: 32 },  // Chapter
 
-});
+    { wch: 18 },  // No. of Questions
+
+    { wch: 12 },  // Marks %
+
+    { wch: 40 },  // Subtopic
+
+    { wch: 22 },  // Subtopic Question Count
+
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws2, "Weightage");
+
+  // Download
+
+  XLSX.writeFile(wb, "physics_paper_analysis.xlsx");
+
+}
+
+// ── Reset ─────────────────────────────────────────────────────────────────────
+
+function resetApp() {
+
+  fileQP = null; fileSYL = null; analysisData = null;
+
+  ["dzQP","dzSYL"].forEach(id => document.getElementById(id).classList.remove("filled","drag"));
+
+  ["iconQP","iconSYL"].forEach((id,i) => document.getElementById(id).textContent = i===0?"📄":"📋");
+
+  ["nameQP","nameSYL"].forEach(id => { const el=document.getElementById(id); el.classList.add("hidden"); el.textContent=""; });
+
+  ["ctaQP","ctaSYL"].forEach(id => document.getElementById(id).classList.remove("hidden"));
+
+  ["fileQP","fileSYL"].forEach(id => document.getElementById(id).value="");
+
+  document.getElementById("progressFill").style.width = "0%";
+
+  [0,1,2,3,4].forEach(i => {
+
+    const el = document.getElementById("step"+i);
+
+    el.classList.remove("step-done"); el.classList.add("step-pending");
+
+    el.textContent = "○ " + el.textContent.replace(/^[✓○] /, "");
+
+  });
+
+  document.getElementById("headerActions").style.display = "none";
+
+  document.getElementById("errorBox").classList.add("hidden");
+
+  updateAnalyseBtn();
+
+  hide("resultScreen"); hide("progressScreen"); show("uploadScreen");
+
+  switchTab("questions");
+
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function show(id) { document.getElementById(id).classList.remove("hidden"); }
+
+function hide(id) { document.getElementById(id).classList.add("hidden"); }
+
+function escHtml(s) {
+
+  if (!s) return "";
+
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+}
+
+</script>
+
+</body>
+
+</html>
