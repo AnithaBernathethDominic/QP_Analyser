@@ -813,35 +813,78 @@ document.getElementById("questionsTbody").innerHTML = d.questions.map((q, i) => 
     window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
     const loadingTask = window.pdfjsLib.getDocument(pdfObjectUrl);
     loadingTask.promise.then(pdfDoc => {
+
+      // Group questions by page
+      const pageGroups = {};
       d.questions.forEach(q => {
         if (!q.pageNum) return;
-        const canvasId = "qcanvas-" + q.q;
-        const canvas = document.getElementById(canvasId);
-        if (!canvas) return;
-        pdfDoc.getPage(q.pageNum).then(page => {
+        if (!pageGroups[q.pageNum]) pageGroups[q.pageNum] = [];
+        pageGroups[q.pageNum].push(q);
+      });
+
+      Object.entries(pageGroups).forEach(([pageNumStr, qs]) => {
+        const pageNum = parseInt(pageNumStr);
+        pdfDoc.getPage(pageNum).then(page => {
           const scale = 1.8;
           const viewport = page.getViewport({ scale });
-          // Render full page to offscreen canvas
-          const offscreen = document.createElement("canvas");
-          offscreen.width = viewport.width;
-          offscreen.height = viewport.height;
-          const ctx = offscreen.getContext("2d");
-          page.render({ canvasContext: ctx, viewport }).promise.then(() => {
-            // Find which question index this is on the page
-            const pageQs = d.questions.filter(x => x.pageNum === q.pageNum).map(x => x.q);
-            const posOnPage = pageQs.indexOf(q.q);
-            const totalOnPage = pageQs.length;
-            // Estimate crop region: divide page height by questions on page
-            const sliceH = Math.floor(offscreen.height / Math.max(totalOnPage, 1));
-            const cropY = posOnPage * sliceH;
-            const cropH = Math.min(sliceH, offscreen.height - cropY);
-            // Add small padding
-            const padTop = posOnPage > 0 ? 10 : 0;
-            const padBot = 10;
-            canvas.width = offscreen.width;
-            canvas.height = cropH - padTop;
-            const dstCtx = canvas.getContext("2d");
-            dstCtx.drawImage(offscreen, 0, cropY + padTop, offscreen.width, cropH - padTop, 0, 0, offscreen.width, cropH - padTop);
+
+          // Get text content to find Y positions of question numbers
+          page.getTextContent().then(textContent => {
+            // Build a map: question number -> Y pixel position on page
+            const qYPositions = {};
+            const pageH = viewport.height;
+
+            textContent.items.forEach(item => {
+              const str = item.str.trim();
+              // Match question number at start of text item (e.g. "1." or "1" or "1)")
+              const m = str.match(/^(\d{1,3})[.):]?\s*$/);
+              if (m) {
+                const qn = parseInt(m[1]);
+                if (qs.some(q => q.q === qn) && qYPositions[qn] === undefined) {
+                  // PDF coords: y is from bottom, convert to top-down
+                  const yFromTop = pageH - (item.transform[5] * scale);
+                  qYPositions[qn] = Math.max(0, yFromTop - 20); // 20px above the number
+                }
+              }
+            });
+
+            // Render the page once to offscreen canvas
+            const offscreen = document.createElement("canvas");
+            offscreen.width = viewport.width;
+            offscreen.height = viewport.height;
+            const ctx = offscreen.getContext("2d");
+            page.render({ canvasContext: ctx, viewport }).promise.then(() => {
+
+              qs.forEach((q, idx) => {
+                const canvasId = "qcanvas-" + q.q;
+                const canvas = document.getElementById(canvasId);
+                if (!canvas) return;
+
+                // Determine crop Y start and end
+                let cropTop = qYPositions[q.q];
+                // If we didn't find the exact Y, fall back to equal slicing
+                if (cropTop === undefined) {
+                  cropTop = Math.floor((idx / qs.length) * pageH);
+                }
+
+                // Crop bottom: next question's Y, or end of page
+                const nextQ = qs[idx + 1];
+                let cropBot;
+                if (nextQ && qYPositions[nextQ.q] !== undefined) {
+                  cropBot = qYPositions[nextQ.q];
+                } else if (nextQ) {
+                  cropBot = Math.floor(((idx + 1) / qs.length) * pageH);
+                } else {
+                  cropBot = pageH;
+                }
+
+                const cropH = Math.max(50, cropBot - cropTop);
+                canvas.width = offscreen.width;
+                canvas.height = cropH;
+                const dstCtx = canvas.getContext("2d");
+                dstCtx.drawImage(offscreen, 0, cropTop, offscreen.width, cropH, 0, 0, offscreen.width, cropH);
+              });
+            });
           });
         });
       });
