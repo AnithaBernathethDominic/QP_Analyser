@@ -14,6 +14,10 @@ app.use(express.json({ limit: "50mb" }));
 
 // ======================================================
 // PDF TEXT EXTRACTION WITH LINE + QUESTION POSITION MAP
+// Supports question formats:
+// 1 The diagram shows...
+// 1. The diagram shows...
+// 1) The diagram shows...
 // ======================================================
 
 async function extractPdfPages(buffer) {
@@ -85,12 +89,19 @@ async function extractPdfPages(buffer) {
       const trimmed = line.text.trim();
 
       /*
-        Question numbers in this type of MCQ paper are normally on the left side.
-        This prevents values like 2.0 N, 4.0 N, 30 cm, 70 cm from becoming question numbers.
+        Question numbers are usually on the left side.
+        This prevents values like 2.0 N, 4.0 N, 30 cm, 70 cm
+        from becoming question numbers.
       */
       if (line.xMin > pageW * 0.24) return;
 
-      const match = trimmed.match(/^(\d{1,3})\.\s+/);
+      /*
+        Supports:
+        1 The diagram shows...
+        1. The diagram shows...
+        1) The diagram shows...
+      */
+      const match = trimmed.match(/^(\d{1,3})(?:\.|\))?\s+(?=[A-Z])/);
 
       if (!match) return;
 
@@ -130,7 +141,8 @@ function detectPaperType(pages) {
   if (
     text.includes("multiple choice") ||
     text.includes("paper 2") ||
-    text.includes("mcqs")
+    text.includes("mcqs") ||
+    text.includes("for each question there are four possible answers")
   ) {
     return "MCQ";
   }
@@ -174,7 +186,7 @@ function scorePage(text) {
   });
 
   const positivePatterns = [
-    /\b\d{1,3}\.\s+(a|an|the|which|what|why|how|identify|calculate|state|explain|describe)/i,
+    /\b\d{1,3}(?:\.|\))?\s+(a|an|the|which|what|why|how|identify|calculate|state|explain|describe)/i,
     /\bA\b[\s\S]*\bB\b[\s\S]*\bC\b[\s\S]*\bD\b/i,
     /calculate|state|explain|describe|which|what/i,
   ];
@@ -214,10 +226,40 @@ function getQuestionPages(pages) {
 function detectExpectedQuestionCount(pages, paperType) {
   const fullText = pages.map((p) => p.text).join(" ");
 
-  const explicit = fullText.match(/there\s+are\s+(\d+)\s+questions/i);
+  const wordNums = {
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+    eleven: 11,
+    twelve: 12,
+    thirteen: 13,
+    fourteen: 14,
+    fifteen: 15,
+    sixteen: 16,
+    seventeen: 17,
+    eighteen: 18,
+    nineteen: 19,
+    twenty: 20,
+    thirty: 30,
+    forty: 40,
+    fifty: 50,
+    sixty: 60,
+  };
+
+  const explicit = fullText.match(
+    /there\s+are\s+([a-z]+|\d+)\s+questions/i
+  );
 
   if (explicit) {
-    const n = parseInt(explicit[1], 10);
+    const value = explicit[1].toLowerCase();
+    const n = /^\d+$/.test(value) ? parseInt(value, 10) : wordNums[value];
 
     if (n && n >= 10) return n;
   }
@@ -250,19 +292,43 @@ function detectExpectedQuestionCount(pages, paperType) {
 function cleanExtractedQuestionText(raw, qNum) {
   let text = String(raw || "");
 
-  text = text.replace(new RegExp("^\\s*" + qNum + "\\.\\s*"), "");
+  /*
+    Remove starting question number:
+    1 The...
+    1. The...
+    1) The...
+  */
+  text = text.replace(
+    new RegExp("^\\s*" + qNum + "(?:\\.|\\))?\\s*"),
+    ""
+  );
 
   text = text
     .replace(/Page\s+\d+\s+of\s+\d+/gi, " ")
+    .replace(/© Cambridge University Press & Assessment \d{4}/gi, " ")
+    .replace(/\[Turn over\]/gi, " ")
+    .replace(/\b0625\/22\/F\/M\/26\b/gi, " ")
+    .replace(/\b0625\/\d+\/[A-Z]\/[A-Z]\/\d+\b/gi, " ")
+    .replace(/\bIB26\s+03_0625_22\/3RP\b/gi, " ")
+    .replace(/\*?\d{10}\*?/g, " ")
+    .replace(/Cambridge IGCSE™/gi, " ")
+    .replace(/PHYSICS 0625\/22/gi, " ")
+    .replace(/Paper 2 Multiple Choice.*?45 minutes/gi, " ")
     .replace(/First Term Summative Examination/gi, " ")
     .replace(/Name of Student:.*/gi, " ")
     .replace(/Grade:\s*\d+.*/gi, " ")
     .replace(/Subject:.*/gi, " ")
     .replace(/Duration:.*/gi, " ")
     .replace(/Maximum Marks:.*/gi, " ")
-    .replace(/Instructions to Candidates:.*/gi, " ")
     .replace(/Day:\s*.*Date:\s*.*/gi, " ")
     .replace(/Teacher Name:.*/gi, " ")
+    .replace(/Instructions to Candidates:.*/gi, " ")
+    .replace(/INSTRUCTIONS[\s\S]*?INFORMATION/gi, " ")
+    .replace(/The total mark for this paper is 40\./gi, " ")
+    .replace(/Each correct answer will score one mark\./gi, " ")
+    .replace(/Any rough working should be done on this question paper\./gi, " ")
+    .replace(/Permission to reproduce[\s\S]*/gi, " ")
+    .replace(/Cambridge International Education[\s\S]*/gi, " ")
     .replace(/\s+\n/g, "\n")
     .replace(/\n\s+/g, "\n")
     .replace(/[ \t]+/g, " ")
@@ -274,18 +340,14 @@ function cleanExtractedQuestionText(raw, qNum) {
 function normalizeMcqText(text) {
   let t = String(text || "");
 
-  /*
-    Keep newlines, but clean repeated spaces.
-    This helps the frontend show MCQ options more clearly.
-  */
   t = t
     .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
   /*
-    If A/B/C/D options are on the same line, add spacing before them.
-    This is not perfect, but it improves display.
+    Improve display of MCQ options when PDF extraction places them on one line.
+    This will not be perfect for every Cambridge paper, but it helps readability.
   */
   t = t.replace(/\s+(A)\s+(?=[A-Z0-9])/g, "\nA ");
   t = t.replace(/\s+(B)\s+(?=[A-Z0-9])/g, "\nB ");
@@ -316,16 +378,32 @@ function questionHasVisual(q) {
     "tank",
     "cube",
     "balance",
+    "balloon",
+    "measuring cylinder",
+    "stone",
+    "kettle",
+    "wave",
+    "oscilloscope",
+    "circuit",
+    "voltmeter",
+    "resistor",
+    "battery",
+    "conductor",
+    "magnetic poles",
+    "gold foil",
+    "field",
     "door handle",
     "metre rule",
     "wardrobe",
     "velocity-time",
+    "speed-time",
     "velocity vs time",
     "position-time",
     "position as a function of time",
     "the table shows",
     "the diagram shows",
     "the graph shows",
+    "the diagrams show",
   ];
 
   return visualKeywords.some((word) => text.includes(word));
@@ -426,7 +504,9 @@ function assignPageNumsToQuestions(finalQuestions, qpPages) {
     const matchedPage = qpPages.find((p) => {
       if (p.qYMap && p.qYMap[qNum] !== undefined) return true;
 
-      const regex = new RegExp("(^|\\n|\\s)" + qNum + "\\.\\s+[A-Za-z]");
+      const regex = new RegExp(
+        "(^|\\n|\\s)" + qNum + "(?:\\.|\\))?\\s+[A-Za-z]"
+      );
 
       return regex.test(p.text);
     });
@@ -611,6 +691,10 @@ STRICT RULES:
     } catch (err) {
       console.error("Topic mapping batch failed:", err.message);
 
+      /*
+        Keep extracted questions even if topic mapping fails.
+        This prevents the entire analysis from failing.
+      */
       batch.forEach((q) => mapped.push(q));
     }
 
@@ -699,8 +783,10 @@ app.post(
       }
 
       /*
-        Fallback only when server extraction is very poor.
-        This prevents good full questions from being replaced by AI summaries.
+        Fallback only when server extraction is completely poor.
+        For MCQ papers, if we extracted at least some questions,
+        keep server extraction instead of using Groq fallback.
+        This prevents JSON errors on Cambridge symbols like α, β, arrows, fractions.
       */
       const threshold = expectedQuestionCount
         ? expectedQuestionCount * 0.8
@@ -708,19 +794,24 @@ app.post(
 
       if (allQuestions.length < threshold) {
         console.log(
-          `Extraction got ${allQuestions.length}, using AI fallback.`
+          `Extraction got ${allQuestions.length}, below threshold ${threshold}.`
         );
 
-        allQuestions = [];
+        if (paperType === "MCQ" && allQuestions.length > 0) {
+          console.log("Skipping AI fallback for MCQ paper; keeping server extraction.");
+        } else {
+          console.log("Using AI fallback.");
 
-        const chunks = buildChunks(questionPages, paperType);
+          allQuestions = [];
 
-        for (let i = 0; i < chunks.length; i++) {
-          const chunkText = chunks[i]
-            .map((p) => `[Page ${p.pageNum}]\n${p.text}`)
-            .join("\n\n");
+          const chunks = buildChunks(questionPages, paperType);
 
-          const prompt = `You are an IGCSE Physics question paper parser.
+          for (let i = 0; i < chunks.length; i++) {
+            const chunkText = chunks[i]
+              .map((p) => `[Page ${p.pageNum}]\n${p.text}`)
+              .join("\n\n");
+
+            const prompt = `You are an IGCSE Physics question paper parser.
 
 Paper type: ${paperType}
 
@@ -756,14 +847,15 @@ RULES:
 - Include pageNum.
 - Return valid JSON only.`;
 
-          const result = await callGroq(groq, prompt);
+            const result = await callGroq(groq, prompt);
 
-          if (Array.isArray(result)) {
-            allQuestions.push(...result);
-          }
+            if (Array.isArray(result)) {
+              allQuestions.push(...result);
+            }
 
-          if (i < chunks.length - 1) {
-            await sleep(1800);
+            if (i < chunks.length - 1) {
+              await sleep(1800);
+            }
           }
         }
       }
