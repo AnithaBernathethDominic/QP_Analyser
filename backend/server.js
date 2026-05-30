@@ -44,7 +44,9 @@ async function extractPdfPages(buffer) {
 
     const content = await page.getTextContent();
 
-    const text = content.items
+    const items = content.items;
+
+    const text = items
 
       .map((item) => item.str)
 
@@ -54,20 +56,44 @@ async function extractPdfPages(buffer) {
 
       .trim();
 
-    // Build question-number -> Y position map for this page (PDF coords, from bottom)
-    // We look for items that are standalone numbers like "1." or "1" followed by text
+    // Build question-number -> Y fraction map (measured from top of page)
+    // Handles two PDF layouts:
+    //   Pattern A: "1.  A student hangs..." (number inline with question text)
+    //   Pattern B: "6." as standalone item, question text beside it at same Y
     const qYMap = {};
-    const items = content.items;
+    const pageH = viewport.height;
+
     for (let j = 0; j < items.length; j++) {
       const str = items[j].str.trim();
-      const m = str.match(/^(\d{1,3})[.):]?$/);
-      if (m) {
-        const qn = parseInt(m[1]);
+      if (!str) continue;
+
+      // Pattern A: number+dot at start of a longer string e.g. "1.  A student..."
+      const inlineMatch = str.match(/^(\d{1,2})\.(\s|$)/);
+      if (inlineMatch) {
+        const qn = parseInt(inlineMatch[1]);
         if (qn >= 1 && qn <= 200 && qYMap[qn] === undefined) {
-          // y is from bottom of page in PDF coords; store as fraction from top
-          const yFromBottom = items[j].transform[5];
-          const yFromTop = viewport.height - yFromBottom;
-          qYMap[qn] = parseFloat((yFromTop / viewport.height).toFixed(4));
+          const yFromTop = pageH - items[j].transform[5];
+          qYMap[qn] = parseFloat((yFromTop / pageH).toFixed(4));
+          continue;
+        }
+      }
+
+      // Pattern B: standalone "6." or "34." with text beside it at same Y
+      const standaloneMatch = str.match(/^(\d{1,2})\.$/) ;
+      if (standaloneMatch) {
+        const qn = parseInt(standaloneMatch[1]);
+        if (qn >= 1 && qn <= 200 && qYMap[qn] === undefined) {
+          // Verify there's a neighbouring item at roughly the same Y with real text
+          const thisY = items[j].transform[5];
+          const hasNeighbour = items.some((other, k) => {
+            if (k === j) return false;
+            const dy = Math.abs(other.transform[5] - thisY);
+            return dy < 5 && other.str.trim().length > 5;
+          });
+          if (hasNeighbour) {
+            const yFromTop = pageH - thisY;
+            qYMap[qn] = parseFloat((yFromTop / pageH).toFixed(4));
+          }
         }
       }
     }
