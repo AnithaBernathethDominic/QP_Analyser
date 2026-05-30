@@ -808,13 +808,13 @@ document.getElementById("questionsTbody").innerHTML = d.questions.map((q, i) => 
 
 }).join("");
 
-  // Render cropped question images using PDF.js
+  // Render cropped question images using PDF.js with server-provided yFrac positions
   if (pdfObjectUrl && window.pdfjsLib) {
     window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
     const loadingTask = window.pdfjsLib.getDocument(pdfObjectUrl);
     loadingTask.promise.then(pdfDoc => {
 
-      // Group questions by page
+      // Group questions by page, preserving order
       const pageGroups = {};
       d.questions.forEach(q => {
         if (!q.pageNum) return;
@@ -822,68 +822,61 @@ document.getElementById("questionsTbody").innerHTML = d.questions.map((q, i) => 
         pageGroups[q.pageNum].push(q);
       });
 
+      // Cache rendered pages to avoid re-rendering same page multiple times
+      const renderedPages = {};
+
+      function getRenderedPage(pageNum, page, scale) {
+        if (renderedPages[pageNum]) return Promise.resolve(renderedPages[pageNum]);
+        const viewport = page.getViewport({ scale });
+        const offscreen = document.createElement("canvas");
+        offscreen.width = viewport.width;
+        offscreen.height = viewport.height;
+        const ctx = offscreen.getContext("2d");
+        return page.render({ canvasContext: ctx, viewport }).promise.then(() => {
+          renderedPages[pageNum] = { offscreen, viewport };
+          return renderedPages[pageNum];
+        });
+      }
+
       Object.entries(pageGroups).forEach(([pageNumStr, qs]) => {
         const pageNum = parseInt(pageNumStr);
         pdfDoc.getPage(pageNum).then(page => {
           const scale = 1.8;
-          const viewport = page.getViewport({ scale });
-
-          // Get text content to find Y positions of question numbers
-          page.getTextContent().then(textContent => {
-            // Build a map: question number -> Y pixel position on page
-            const qYPositions = {};
+          getRenderedPage(pageNum, page, scale).then(({ offscreen, viewport }) => {
             const pageH = viewport.height;
+            const PADDING_TOP = 8; // px to subtract from top to include the question number itself
 
-            textContent.items.forEach(item => {
-              const str = item.str.trim();
-              // Match question number at start of text item (e.g. "1." or "1" or "1)")
-              const m = str.match(/^(\d{1,3})[.):]?\s*$/);
-              if (m) {
-                const qn = parseInt(m[1]);
-                if (qs.some(q => q.q === qn) && qYPositions[qn] === undefined) {
-                  // PDF coords: y is from bottom, convert to top-down
-                  const yFromTop = pageH - (item.transform[5] * scale);
-                  qYPositions[qn] = Math.max(0, yFromTop - 20); // 20px above the number
-                }
+            qs.forEach((q, idx) => {
+              const canvasId = "qcanvas-" + q.q;
+              const canvas = document.getElementById(canvasId);
+              if (!canvas) return;
+
+              // Use server-provided yFrac (fraction from top of page, scale=1.0 coords)
+              // Convert to rendered pixels at current scale
+              let cropTop;
+              if (q.yFrac !== null && q.yFrac !== undefined) {
+                cropTop = Math.max(0, Math.floor(q.yFrac * pageH) - PADDING_TOP);
+              } else {
+                // fallback: equal slice
+                cropTop = Math.floor((idx / qs.length) * pageH);
               }
-            });
 
-            // Render the page once to offscreen canvas
-            const offscreen = document.createElement("canvas");
-            offscreen.width = viewport.width;
-            offscreen.height = viewport.height;
-            const ctx = offscreen.getContext("2d");
-            page.render({ canvasContext: ctx, viewport }).promise.then(() => {
+              // Crop bottom: use next question on SAME page's yFrac, or end of page
+              const nextQ = qs[idx + 1]; // next question on this same page
+              let cropBot;
+              if (nextQ && nextQ.yFrac !== null && nextQ.yFrac !== undefined) {
+                cropBot = Math.max(cropTop + 40, Math.floor(nextQ.yFrac * pageH) - PADDING_TOP);
+              } else if (nextQ) {
+                cropBot = Math.floor(((idx + 1) / qs.length) * pageH);
+              } else {
+                cropBot = pageH; // last question on page — go to bottom
+              }
 
-              qs.forEach((q, idx) => {
-                const canvasId = "qcanvas-" + q.q;
-                const canvas = document.getElementById(canvasId);
-                if (!canvas) return;
-
-                // Determine crop Y start and end
-                let cropTop = qYPositions[q.q];
-                // If we didn't find the exact Y, fall back to equal slicing
-                if (cropTop === undefined) {
-                  cropTop = Math.floor((idx / qs.length) * pageH);
-                }
-
-                // Crop bottom: next question's Y, or end of page
-                const nextQ = qs[idx + 1];
-                let cropBot;
-                if (nextQ && qYPositions[nextQ.q] !== undefined) {
-                  cropBot = qYPositions[nextQ.q];
-                } else if (nextQ) {
-                  cropBot = Math.floor(((idx + 1) / qs.length) * pageH);
-                } else {
-                  cropBot = pageH;
-                }
-
-                const cropH = Math.max(50, cropBot - cropTop);
-                canvas.width = offscreen.width;
-                canvas.height = cropH;
-                const dstCtx = canvas.getContext("2d");
-                dstCtx.drawImage(offscreen, 0, cropTop, offscreen.width, cropH, 0, 0, offscreen.width, cropH);
-              });
+              const cropH = Math.max(60, cropBot - cropTop);
+              canvas.width = offscreen.width;
+              canvas.height = cropH;
+              const dstCtx = canvas.getContext("2d");
+              dstCtx.drawImage(offscreen, 0, cropTop, offscreen.width, cropH, 0, 0, offscreen.width, cropH);
             });
           });
         });
