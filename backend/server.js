@@ -29,6 +29,9 @@ async function extractPdfPages(buffer) {
     const content = await page.getTextContent();
     const items = content.items || [];
 
+    const pageW = viewport.width;
+    const pageH = viewport.height;
+
     const text = items
       .map((item) => item.str)
       .join(" ")
@@ -36,41 +39,82 @@ async function extractPdfPages(buffer) {
       .trim();
 
     const qYMap = {};
-    const pageH = viewport.height;
 
     for (let j = 0; j < items.length; j++) {
       const str = items[j].str.trim();
       if (!str) continue;
 
-      const inlineMatch = str.match(/^(\d{1,3})\.(\s|$)/);
+      const x = items[j].transform[4];
+      const y = items[j].transform[5];
 
-      if (inlineMatch) {
-        const qn = parseInt(inlineMatch[1], 10);
+      /*
+        IMPORTANT:
+        Question numbers are usually at the LEFT side of the page.
+        Values like 2.0 N, 4.0 N, 30 cm, 70 cm may appear in diagrams/tables.
+        We must NOT treat those as question numbers.
+      */
 
-        if (qn >= 1 && qn <= 200 && qYMap[qn] === undefined) {
-          const yFromTop = pageH - items[j].transform[5];
-          qYMap[qn] = parseFloat((yFromTop / pageH).toFixed(4));
-          continue;
-        }
-      }
+      const isLeftQuestionNumberArea = x < pageW * 0.18;
 
+      if (!isLeftQuestionNumberArea) continue;
+
+      // Case 1: item is exactly "1." or "2."
       const standaloneMatch = str.match(/^(\d{1,3})\.$/);
 
       if (standaloneMatch) {
         const qn = parseInt(standaloneMatch[1], 10);
 
         if (qn >= 1 && qn <= 200 && qYMap[qn] === undefined) {
-          const thisY = items[j].transform[5];
+          const yFromTop = pageH - y;
+          qYMap[qn] = parseFloat((yFromTop / pageH).toFixed(4));
+        }
 
-          const hasNeighbour = items.some((other, k) => {
+        continue;
+      }
+
+      // Case 2: item starts like "1. A student..."
+      const inlineMatch = str.match(/^(\d{1,3})\.\s+[A-Za-z]/);
+
+      if (inlineMatch) {
+        const qn = parseInt(inlineMatch[1], 10);
+
+        if (qn >= 1 && qn <= 200 && qYMap[qn] === undefined) {
+          const yFromTop = pageH - y;
+          qYMap[qn] = parseFloat((yFromTop / pageH).toFixed(4));
+        }
+
+        continue;
+      }
+
+      /*
+        Case 3:
+        Sometimes PDF separates "1." and question text into nearby text items.
+        So check if the current item is a number and nearby right-side text exists.
+      */
+      const numberOnlyMatch = str.match(/^(\d{1,3})$/);
+
+      if (numberOnlyMatch) {
+        const qn = parseInt(numberOnlyMatch[1], 10);
+
+        if (qn >= 1 && qn <= 200 && qYMap[qn] === undefined) {
+          const hasQuestionTextBesideIt = items.some((other, k) => {
             if (k === j) return false;
 
-            const dy = Math.abs(other.transform[5] - thisY);
-            return dy < 5 && other.str.trim().length > 5;
+            const otherStr = other.str.trim();
+            if (!otherStr || otherStr.length < 5) return false;
+
+            const ox = other.transform[4];
+            const oy = other.transform[5];
+
+            const sameLine = Math.abs(oy - y) < 6;
+            const rightSide = ox > x && ox < pageW * 0.75;
+            const startsLikeQuestion = /^[A-Za-z]/.test(otherStr);
+
+            return sameLine && rightSide && startsLikeQuestion;
           });
 
-          if (hasNeighbour) {
-            const yFromTop = pageH - thisY;
+          if (hasQuestionTextBesideIt) {
+            const yFromTop = pageH - y;
             qYMap[qn] = parseFloat((yFromTop / pageH).toFixed(4));
           }
         }
@@ -80,7 +124,8 @@ async function extractPdfPages(buffer) {
     pages.push({
       pageNum: i,
       text,
-      pageHeight: viewport.height,
+      pageWidth: pageW,
+      pageHeight: pageH,
       qYMap,
     });
   }
