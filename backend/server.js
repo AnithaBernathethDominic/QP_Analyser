@@ -384,160 +384,81 @@ function extractMcqQuestionsFromText(pages, expectedCount) {
 
   const questions = [];
 
-  const starter =
-
-  "(A|An|The|Which|What|Why|How|Identify|Calculate|State|Explain|Describe|Both|Equal|One|Two|Three|Four|Graph|Uranium|Intruder|A\\s+satellite|One\\s+nuclear)";
-
-  const candidateRegex = new RegExp(
-
-    `(?:^|\\s)(\\d{1,3})[\\.)]?\\s+(?=${starter}\\b)`,
-
-    "gi"
-
-  );
-
-  const candidates = [];
-
-  let match;
-
-  while ((match = candidateRegex.exec(fullText)) !== null) {
-
-    const qNum = parseInt(match[1], 10);
-
-    if (qNum >= 1 && qNum <= 200) {
-
-      const digitIndex = match[0].search(/\d/);
-
-      const start = match.index + digitIndex;
-
-      candidates.push({
-
-        q: qNum,
-
-        start,
-
-      });
-
+  // ── STEP 1: Build candidate list from qYMap (most reliable — direct PDF coords) ──
+  // qYMap[n] exists only when a "N." token was found on that page at a specific Y position.
+  // These are already the correct start-of-question positions.
+  const qYMapCandidates = {}; // qNum → { pageNum, yFrac }
+  for (const pg of pages) {
+    if (!pg.qYMap) continue;
+    for (const [qnStr, yFrac] of Object.entries(pg.qYMap)) {
+      const qn = parseInt(qnStr, 10);
+      if (qn >= 1 && qn <= 200 && !(qn in qYMapCandidates)) {
+        qYMapCandidates[qn] = { pageNum: pg.pageNum, yFrac };
+      }
     }
-
   }
 
-// Fallback: catch missed numbered questions like "31 Graph 1 shows..."
+  // ── STEP 2: For each question, find its start position in fullText ──
+  // Use a broad regex anchored to the question number — capture ALL text from
+  // "N." or "N " (at word boundary) regardless of what word follows.
+  // This avoids the old bug where "A student hangs..." caused the regex to
+  // latch onto the later "Which" sentence instead of the true question start.
 
-for (let n = 1; n <= (expectedCount || 60); n++) {
-
-  const already = candidates.some((c) => c.q === n);
-
-  if (already) continue;
-
-  const looseRegex = new RegExp(`(?:^|\\s)${n}[\\.)]?\\s+`, "g");
-
-  let looseMatch;
-
-  while ((looseMatch = looseRegex.exec(fullText)) !== null) {
-
-    const after = fullText.slice(looseRegex.lastIndex, looseRegex.lastIndex + 80);
-
-    if (
-
-      after.trim().length > 10 &&
-
-      !/^[\\d\\.\\-\\/\\s]+$/.test(after.slice(0, 20)) &&
-
-      !after.toLowerCase().startsWith("page") &&
-
-      !after.toLowerCase().startsWith("cambridge") &&
-
-      !after.toLowerCase().startsWith("copyright")
-
-    ) {
-
-      const digitIndex = looseMatch[0].search(/\d/);
-
-      candidates.push({
-
-        q: n,
-
-        start: looseMatch.index + digitIndex,
-
-      });
-
-      break;
-
-    }
-
-  }
-
-}
-
-  if (candidates.length === 0) return questions;
-
-  candidates.sort((a, b) => a.start - b.start);
-
-  const highestDetected = Math.max(...candidates.map((c) => c.q));
-
-  const effectiveCount =
-
-    expectedCount && expectedCount >= 10
-
-      ? expectedCount
-
-      : highestDetected;
+  const effectiveCount = (expectedCount && expectedCount >= 10)
+    ? expectedCount
+    : Math.max(...Object.keys(qYMapCandidates).map(Number), 1);
 
   const starts = [];
 
-  let lastStart = -1;
-
   for (let n = 1; n <= effectiveCount; n++) {
+    // Find this question's position in fullText — try multiple patterns in priority order
+    const patterns = [
+      // Pattern 1: "N. " preceded by space/start (most common in question papers)
+      new RegExp(`(?:^|\\s)(${n})\\.\\s+(?=\\S)`, "g"),
+      // Pattern 2: "N) " 
+      new RegExp(`(?:^|\\s)(${n})\\)\\s+(?=\\S)`, "g"),
+      // Pattern 3: bare "N " with enough context after (fallback)
+      new RegExp(`(?:^|\\s)(${n})\\s{1,3}(?=[A-Z])`, "g"),
+    ];
 
-    const found = candidates.find(
+    let bestStart = null;
 
-      (c) => c.q === n && c.start > lastStart
-
-    );
-
-    if (found) {
-
-      // Find the page this question is on:
-      // Strategy 1: check qYMap on each page to see which page has this question number
-      let pageNum = null;
-      for (const pg of pages) {
-        if (pg.qYMap && pg.qYMap[n] !== undefined) {
-          pageNum = pg.pageNum;
-          break;
-        }
+    for (const pat of patterns) {
+      let m;
+      while ((m = pat.exec(fullText)) !== null) {
+        const candidateStart = m.index + m[0].search(/\d/);
+        // Reject if inside a page marker
+        const around = fullText.slice(Math.max(0, candidateStart - 10), candidateStart + 5);
+        if (around.includes("PAGE:")) continue;
+        // Reject obvious non-question hits (page numbers, mark allocations, answer options)
+        const after80 = fullText.slice(m.index + m[0].length, m.index + m[0].length + 80);
+        if (/^(page|cambridge|copyright|\d+\s*mark)/i.test(after80.trim())) continue;
+        // Accept earliest occurrence
+        if (bestStart === null) { bestStart = candidateStart; break; }
       }
-      // Strategy 2: fallback - last PAGE marker before the question start in fullText
-      if (!pageNum) {
-        const before = fullText.slice(0, found.start);
-        const pageMatches = [...before.matchAll(/<<<PAGE:(\d+)>>>/g)];
-        pageNum = pageMatches.length ? parseInt(pageMatches[pageMatches.length - 1][1], 10) : null;
-      }
-
-      // Get Y fraction position of this question on its page
-      const pgData = pages.find(pg => pg.pageNum === pageNum);
-      const yFrac = (pgData && pgData.qYMap && pgData.qYMap[n] !== undefined)
-        ? pgData.qYMap[n]
-        : null;
-
-      starts.push({
-
-        q: n,
-
-        start: found.start,
-
-        pageNum,
-
-        yFrac,
-
-      });
-
-      lastStart = found.start;
-
+      if (bestStart !== null) break;
     }
 
+    if (bestStart === null) continue;
+
+    // Page assignment: prefer qYMap, fall back to last PAGE marker before bestStart
+    const qymEntry = qYMapCandidates[n];
+    let pageNum = qymEntry?.pageNum ?? null;
+    let yFrac   = qymEntry?.yFrac  ?? null;
+
+    if (!pageNum) {
+      const before = fullText.slice(0, bestStart);
+      const pageMatches = [...before.matchAll(/<<<PAGE:(\d+)>>>/g)];
+      pageNum = pageMatches.length ? parseInt(pageMatches[pageMatches.length - 1][1], 10) : null;
+    }
+
+    starts.push({ q: n, start: bestStart, pageNum, yFrac });
   }
 
+  // Sort by position in text (should already be sequential, but be safe)
+  starts.sort((a, b) => a.start - b.start);
+
+  // ── STEP 3: Slice text between consecutive question starts ──
   for (let i = 0; i < starts.length; i++) {
 
     const current = starts[i];
@@ -574,9 +495,9 @@ for (let n = 1; n <= (expectedCount || 60); n++) {
 
     if (text) {
 
-      // Detect if this question has a diagram/figure that needs an image crop
-      const hasImage = /\b(diagram|figure|graph|table|chart|shows?|illustrat|draw|sketch|below|alongside|opposite|image)\b/i.test(text)
-        && !/\bwhich (source|energy|statement|row|quantity)\b/i.test(text.slice(0, 80));
+      // hasImage: look for diagram/figure/graph keywords in the FULL extracted text
+      // (now we have the complete question text, not just the last sentence)
+      const hasImage = /\b(diagram|figure|graph|table|chart|show[sn]|illustrat|draw[sn]?|sketch|below|alongside|opposite)\b/i.test(text);
 
       questions.push({
 
