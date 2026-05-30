@@ -1060,6 +1060,131 @@ function renderQuestionCrops(pdfObjectUrl, questions) {
 
         const ctx = offscreen.getContext("2d");
 
+        return page
+          .render({
+            canvasContext: ctx,
+            viewport,
+          })
+          .promise.then(() => {
+            renderedPages[pageNum] = {
+              offscreen,
+              viewport,
+            };
+
+            return renderedPages[pageNum];
+          });
+      }
+
+      Object.entries(pageGroups).forEach(([pageNumStr, qs]) => {
+        qs.sort((a, b) => {
+          if (a.yFrac == null && b.yFrac == null) return a.q - b.q;
+          if (a.yFrac == null) return 1;
+          if (b.yFrac == null) return -1;
+          return a.yFrac - b.yFrac;
+        });
+
+        const pageNum = parseInt(pageNumStr, 10);
+
+        pdfDoc.getPage(pageNum).then((page) => {
+          const scale = 2.0;
+
+          getRenderedPage(pageNum, page, scale).then(({ offscreen, viewport }) => {
+            const pageH = viewport.height;
+
+            qs.forEach((q, idx) => {
+              const canvasId = "qcanvas-" + q.q;
+              const canvas = document.getElementById(canvasId);
+
+              if (!canvas) return;
+
+              /*
+                Top padding:
+                Keep some space above the question number.
+              */
+              const TOP_PAD = 25;
+
+              /*
+                Bottom padding:
+                Use a small positive padding so MCQ options are not cut.
+                But do not go too much into the next question.
+              */
+              const BOTTOM_PAD = 10;
+
+              let cropTop;
+
+              if (q.yFrac !== null && q.yFrac !== undefined) {
+                cropTop = Math.max(0, Math.floor(q.yFrac * pageH) - TOP_PAD);
+              } else {
+                cropTop = Math.floor((idx / qs.length) * pageH);
+              }
+
+              const nextQ = qs[idx + 1];
+
+              let cropBot;
+
+              if (nextQ && nextQ.yFrac !== null && nextQ.yFrac !== undefined) {
+                cropBot = Math.floor(nextQ.yFrac * pageH) - BOTTOM_PAD;
+              } else if (nextQ) {
+                cropBot = Math.floor(((idx + 1) / qs.length) * pageH);
+              } else {
+                cropBot = pageH - 45;
+              }
+
+              cropBot = Math.min(pageH - 20, cropBot);
+
+              /*
+                Safety check:
+                If the calculated bottom is too close to the top,
+                give the crop a reasonable height.
+              */
+              if (cropBot - cropTop < 180) {
+                cropBot = Math.min(pageH - 20, cropTop + 320);
+              }
+
+              const cropH = Math.max(180, cropBot - cropTop);
+
+              canvas.width = offscreen.width;
+              canvas.height = cropH;
+
+              const dstCtx = canvas.getContext("2d");
+
+              dstCtx.clearRect(0, 0, canvas.width, canvas.height);
+              dstCtx.drawImage(
+                offscreen,
+                0,
+                cropTop,
+                offscreen.width,
+                cropH,
+                0,
+                0,
+                offscreen.width,
+                cropH
+              );
+            });
+          });
+        });
+      });
+    })
+    .catch((err) => {
+      console.warn("PDF.js render error:", err);
+    });
+}
+
+      const renderedPages = {};
+
+      function getRenderedPage(pageNum, page, scale) {
+        if (renderedPages[pageNum]) {
+          return Promise.resolve(renderedPages[pageNum]);
+        }
+
+        const viewport = page.getViewport({ scale });
+
+        const offscreen = document.createElement("canvas");
+        offscreen.width = viewport.width;
+        offscreen.height = viewport.height;
+
+        const ctx = offscreen.getContext("2d");
+
         return page.render({
           canvasContext: ctx,
           viewport
