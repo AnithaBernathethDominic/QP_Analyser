@@ -852,27 +852,27 @@ document.getElementById("questionsTbody").innerHTML = d.questions.map((q, i) => 
               if (!canvas) return;
 
               // Use server-provided yFrac (fraction from top of page, scale=1.0 coords)
-              // Convert to rendered pixels at current scale
+              // yFrac points to top of the question number line — subtract padding to include it
+              const EXTRA_PAD = 15; // extra pixels above question number
               let cropTop;
               if (q.yFrac !== null && q.yFrac !== undefined) {
-                cropTop = Math.max(0, Math.floor(q.yFrac * pageH) - PADDING_TOP);
+                cropTop = Math.max(0, Math.floor(q.yFrac * pageH) - EXTRA_PAD);
               } else {
-                // fallback: equal slice
                 cropTop = Math.floor((idx / qs.length) * pageH);
               }
 
-              // Crop bottom: use next question on SAME page's yFrac, or end of page
-              const nextQ = qs[idx + 1]; // next question on this same page
+              // Crop bottom: next question on SAME page yFrac minus padding, or end of page
+              const nextQ = qs[idx + 1];
               let cropBot;
               if (nextQ && nextQ.yFrac !== null && nextQ.yFrac !== undefined) {
-                cropBot = Math.max(cropTop + 40, Math.floor(nextQ.yFrac * pageH) - PADDING_TOP);
+                cropBot = Math.max(cropTop + 80, Math.floor(nextQ.yFrac * pageH) - EXTRA_PAD);
               } else if (nextQ) {
                 cropBot = Math.floor(((idx + 1) / qs.length) * pageH);
               } else {
-                cropBot = pageH; // last question on page — go to bottom
+                cropBot = pageH;
               }
 
-              const cropH = Math.max(60, cropBot - cropTop);
+              const cropH = Math.max(80, cropBot - cropTop);
               canvas.width = offscreen.width;
               canvas.height = cropH;
               const dstCtx = canvas.getContext("2d");
