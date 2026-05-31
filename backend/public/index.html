@@ -689,25 +689,35 @@ document.getElementById("questionsTbody").innerHTML = d.questions.map((q, i) => 
 
   const color = TOPIC_COLORS[(ci < 0 ? i : ci) % TOPIC_COLORS.length];
 
-  // Format question text: split main question from A/B/C/D options
+  // Format question text: split main question body from A/B/C/D options
   const rawText = (q.fullText || q.text || "").trim();
-  // Find where options start - look for A followed by text, then B, C, D
-  const optRegex = /\b([A-D])\s{2,}(.+?)(?=\s{2,}[B-D]\s{2,}|$)/g;
-  const optMatches = [...rawText.matchAll(optRegex)];
   let questionBody = rawText;
   let optionsHtml = "";
 
-  if (optMatches.length >= 2) {
-    // Split at first option
-    const firstOptIdx = rawText.indexOf(optMatches[0][0]);
-    questionBody = rawText.slice(0, firstOptIdx).trim();
-    optionsHtml = `<div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;">` +
-      optMatches.map(m => `
-        <div style="display:flex;gap:8px;align-items:flex-start;">
-          <span style="color:var(--accent);font-weight:700;min-width:18px">${m[1]}</span>
-          <span style="color:#cbd5e1;font-size:13px">${escHtml(m[2].trim())}</span>
-        </div>`).join("") +
-      `</div>`;
+  // Anchor on the LAST question mark — everything before is the question body,
+  // everything after is column headers (if any) + options A B C D
+  const qMarkPos = rawText.lastIndexOf("?");
+  if (qMarkPos !== -1) {
+    const afterQ = rawText.slice(qMarkPos + 1).trim();
+    const m = afterQ.match(/^(.*?)\s*\bA\s+(.*?)\s+\bB\s+(.*?)\s+\bC\s+(.*?)(?:\s+\bD\s+(.*))?$/s);
+    if (m) {
+      const preamble = (m[1] || "").trim(); // e.g. table column headers
+      questionBody = rawText.slice(0, qMarkPos + 1).trim();
+      if (preamble) questionBody += " " + preamble;
+      const opts = [
+        { letter: "A", text: (m[2] || "").trim() },
+        { letter: "B", text: (m[3] || "").trim() },
+        { letter: "C", text: (m[4] || "").trim() },
+        { letter: "D", text: (m[5] || "").trim() },
+      ].filter(o => o.text);
+      optionsHtml = `<div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;">` +
+        opts.map(o => `
+          <div style="display:flex;gap:10px;align-items:flex-start;padding:6px 10px;background:#1e293b;border-radius:6px;">
+            <span style="color:var(--accent);font-weight:700;min-width:18px;flex-shrink:0">${o.letter}</span>
+            <span style="color:#cbd5e1;font-size:13px;line-height:1.5">${escHtml(o.text)}</span>
+          </div>`).join("") +
+        `</div>`;
+    }
   }
 
   return `
