@@ -683,14 +683,32 @@ function renderResults() {
 
   // Questions table
 
+  // Build a full text lookup from pagesText for fallback extraction
+  const allPagesText = (d.pagesText || []).map(p => p.text).join(" ").replace(/\s+/g, " ");
+
+  // Helper: extract full question text directly from raw PDF pages text
+  function extractQTextFromPages(qNum, nextQNum) {
+    // Find "N. " pattern in combined page text
+    const qRegex = new RegExp(`(?:^|\\s)${qNum}\\s*\\.\\s+(.+?)(?=\\s+${nextQNum || 9999}\\s*\\.|$)`, "s");
+    const m = allPagesText.match(qRegex);
+    return m ? m[1].replace(/Page\s+\d+\s+of\s+\d+/gi, " ").replace(/\s+/g, " ").trim() : null;
+  }
+
 document.getElementById("questionsTbody").innerHTML = d.questions.map((q, i) => {
 
   const ci = d.chapterSummary.findIndex(c => c.chapter === q.topic);
 
   const color = TOPIC_COLORS[(ci < 0 ? i : ci) % TOPIC_COLORS.length];
 
-  // Format question text: split main question body from A/B/C/D options
-  const rawText = (q.fullText || q.text || "").trim();
+  // Get the best available full text for this question
+  // If fullText is short (AI summary), try extracting from raw pages
+  let rawText = (q.fullText || q.text || "").trim();
+  if (rawText.length < 80 && allPagesText.length > 0) {
+    const nextQ = d.questions[i + 1];
+    const extracted = extractQTextFromPages(q.q, nextQ ? nextQ.q : null);
+    if (extracted && extracted.length > rawText.length) rawText = extracted;
+  }
+
   let questionBody = rawText;
   let optionsHtml = "";
 
@@ -701,7 +719,7 @@ document.getElementById("questionsTbody").innerHTML = d.questions.map((q, i) => 
     const afterQ = rawText.slice(qMarkPos + 1).trim();
     const m = afterQ.match(/^(.*?)\s*\bA\s+(.*?)\s+\bB\s+(.*?)\s+\bC\s+(.*?)(?:\s+\bD\s+(.*))?$/s);
     if (m) {
-      const preamble = (m[1] || "").trim(); // e.g. table column headers
+      const preamble = (m[1] || "").trim();
       questionBody = rawText.slice(0, qMarkPos + 1).trim();
       if (preamble) questionBody += " " + preamble;
       const opts = [
