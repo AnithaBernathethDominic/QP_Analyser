@@ -386,7 +386,7 @@ function extractMcqQuestionsFromText(pages, expectedCount) {
 
   const starter =
 
-  "(A|An|The|Which|What|Why|How|Identify|Calculate|State|Explain|Describe|Both|Equal|One|Two|Three|Four|Graph|Uranium|Intruder|A\\s+satellite|One\\s+nuclear)";
+  "(A|An|The|Which|What|Why|How|It|In|On|At|For|Identify|Calculate|State|Explain|Describe|Both|Equal|One|Two|Three|Four|Graph|Uranium|Intruder|A\\s+student|A\\s+ball|A\\s+car|A\\s+beam|A\\s+man|A\\s+woman|A\\s+child|A\\s+cube|A\\s+crane|A\\s+marble|A\\s+penny|A\\s+submarine|A\\s+helicopter|A\\s+footballer|A\\s+wardrobe|A\\s+spring|A\\s+gas|A\\s+forklift|A\\s+satellite|One\\s+nuclear)";
 
   const candidateRegex = new RegExp(
 
