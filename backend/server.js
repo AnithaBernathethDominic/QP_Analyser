@@ -636,7 +636,7 @@ function assignPageNumsToQuestions(finalQuestions, qpPages) {
 
 function buildChunks(questionPages, paperType) {
 
-  const maxChars = paperType === "MCQ" ? 1400 : 1200;
+  const maxChars = paperType === "MCQ" ? 1400 : 800;
 
   const chunks = [];
 
@@ -708,11 +708,11 @@ async function callGroq(groq, prompt, retries = 3) {
 
         ],
 
-        model: "llama-3.1-8b-instant",
+        model: "llama-3.3-70b-versatile",
 
         temperature: 0,
 
-        max_tokens: 900,
+        max_tokens: 2048,
 
         response_format: { type: "json_object" },
 
@@ -758,33 +758,13 @@ async function mapMcqTopicsWithAI(groq, questions, syllabusText) {
 
     const batch = questions.slice(i, i + batchSize);
 
-    const prompt = `You are an IGCSE Physics syllabus mapper.
-
-Return ONLY this JSON object:
-
-{
-
-  "questions": [
-
-    { "q": 1, "topic": "IGCSE syllabus chapter", "subtopic": "IGCSE syllabus subtopic" }
-
-  ]
-
-}
-
-SYLLABUS REFERENCE:
-
-${syllabusText}
-
-QUESTIONS TO MAP:
-
-${batch.map((q) => `Q${q.q}: ${q.text}`).join("\n")}
-
-STRICT RULES:
-
-- Return the same q values given. Do not invent new ones.
-
-- Only return topic and subtopic. Return valid JSON only.`;
+    const batchTexts = batch.map((q) => `Q${q.q}: ${q.text.slice(0,120)}`).join("\n");
+    const prompt = `Map these IGCSE Physics questions to syllabus topics. Return ONLY valid JSON:
+{"questions":[{"q":1,"topic":"topic name","subtopic":"subtopic name"}]}
+Syllabus: ${syllabusText.slice(0,400)}
+Questions:
+${batchTexts}
+Rules: use exact q values given. Return valid JSON only.`;
 
     try {
 
@@ -874,13 +854,15 @@ app.post(
 
       const syllabusText = sylPages
 
-        .slice(0, 3)
+        .slice(0, 2)
 
-        .map((p) => `[Page ${p.pageNum}]\n${p.text}`)
+        .map((p) => p.text)
 
-        .join("\n\n")
+        .join(" ")
 
-        .slice(0, 1000);
+        .replace(/\s+/g, " ")
+
+        .slice(0, 600);
 
       const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -920,43 +902,13 @@ app.post(
 
           const chunkText = chunks[i].map((p) => `[Page ${p.pageNum}]\n${p.text}`).join("\n\n");
 
-          const prompt = `You are an IGCSE Physics question paper parser.
-
-Paper type: ${paperType}
-
-Return ONLY this JSON object:
-
-{
-
-  "questions": [
-
-    { "q": 1, "text": "FULL question text including ALL answer options A B C D exactly as written", "topic": "IGCSE syllabus chapter", "subtopic": "IGCSE syllabus subtopic", "answer": "", "marks": 1 }
-
-  ]
-
-}
-
-SYLLABUS REFERENCE:
-
-${syllabusText}
-
-QUESTION PAPER TEXT:
-
-${chunkText}
-
-RULES:
-
-- Extract every visible numbered question.
-
-- The "text" field MUST contain the COMPLETE question stem AND all MCQ options (A, B, C, D) exactly as they appear.
-
-- Do NOT summarise or shorten the question text.
-
-- For Theory/Practical: use main question number only.
-
-- Match topic and subtopic to syllabus.
-
-- Return valid JSON only.`;
+          // Trim chunkText to stay within token limits
+          const trimmedChunk = chunkText.slice(0, 1200);
+          const prompt = `Extract questions from this IGCSE Physics paper. Return ONLY valid JSON, no other text:
+{"questions":[{"q":1,"text":"full question text","topic":"syllabus topic","subtopic":"syllabus subtopic","marks":1}]}
+Rules: q=main question number only (1,2,3 not 1a/1b). text=complete question text. marks=total marks for that question. topic/subtopic from: ${syllabusText.slice(0,300)}
+Paper text:
+${trimmedChunk}`;
 
           const result = await callGroq(groq, prompt);
 
