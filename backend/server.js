@@ -886,9 +886,14 @@ app.post(
 
       let allQuestions = [];
 
-      if (paperType === "MCQ" && expectedQuestionCount) {
+      if (paperType === "MCQ") {
 
-        const serverExtracted = extractMcqQuestionsFromText(qpPages, expectedQuestionCount);
+        // Try extraction with question pages first, then all pages if that fails
+        let serverExtracted = extractMcqQuestionsFromText(qpPages, expectedQuestionCount);
+        if (serverExtracted.length === 0) {
+          console.log("Question-page extraction got 0, trying all pages...");
+          serverExtracted = extractMcqQuestionsFromText(qpPages.length > 0 ? qpPages : [], expectedQuestionCount || 40);
+        }
 
         console.log("Server extracted MCQs:", serverExtracted.length);
 
@@ -900,9 +905,8 @@ app.post(
 
       }
 
-      // Fallback to AI chunking for non-MCQ or if MCQ extraction got too few questions
-
-      const threshold = expectedQuestionCount ? expectedQuestionCount * 0.5 : 5;
+      // Fallback to AI chunking only if we truly got nothing
+      const threshold = expectedQuestionCount ? Math.min(expectedQuestionCount * 0.3, 5) : 3;
 
       if (allQuestions.length < threshold) {
 
@@ -926,7 +930,7 @@ Return ONLY this JSON object:
 
   "questions": [
 
-    { "q": 1, "text": "brief question summary under 100 chars", "topic": "IGCSE syllabus chapter", "subtopic": "IGCSE syllabus subtopic", "answer": "", "marks": 1 }
+    { "q": 1, "text": "FULL question text including ALL answer options A B C D exactly as written", "topic": "IGCSE syllabus chapter", "subtopic": "IGCSE syllabus subtopic", "answer": "", "marks": 1 }
 
   ]
 
@@ -943,6 +947,10 @@ ${chunkText}
 RULES:
 
 - Extract every visible numbered question.
+
+- The "text" field MUST contain the COMPLETE question stem AND all MCQ options (A, B, C, D) exactly as they appear.
+
+- Do NOT summarise or shorten the question text.
 
 - For Theory/Practical: use main question number only.
 
@@ -1110,6 +1118,9 @@ RULES:
 
       // end images
 
+      // Build full page text map for frontend fallback
+      const pagesText = qpPages.map(p => ({ pageNum: p.pageNum, text: p.text }));
+
       return res.json({
 
         success: true,
@@ -1126,7 +1137,7 @@ RULES:
 
           insights,
 
-          questionPaperBase64,
+          pagesText,
 
           paperTitle: "Physics Question Paper",
 
